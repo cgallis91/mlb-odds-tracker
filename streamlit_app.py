@@ -54,7 +54,7 @@ def get_fanduel_mlb_data():
             main_url = f"https://www.sportsbookreview.com/betting-odds/mlb-baseball/?date={date_str}"
             debug_log.append(f"📡 Main page URL: {main_url}")
             
-            response = session.get(main_url, timeout=30)
+            response = session.get(main_url, timeout=15)  # Reduced timeout
             debug_log.append(f"📊 Response status: {response.status_code}")
             
             if response.status_code == 200:
@@ -105,7 +105,7 @@ def get_fanduel_mlb_data():
                                         # Add delay to be respectful
                                         time.sleep(random.uniform(1.0, 2.0))
                                         
-                                        line_response = session.get(line_history_url, timeout=25)
+                                        line_response = session.get(line_history_url, timeout=10)  # Reduced timeout
                                         debug_log.append(f"   📊 Line history response: {line_response.status_code}")
                                         
                                         if line_response.status_code == 200:
@@ -371,7 +371,7 @@ def create_fallback_data():
     
     return pd.DataFrame(fallback_games)
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=600)  # Cache for 10 minutes instead of 5
 def load_odds_data():
     """Load FanDuel odds data for today and tomorrow"""
     
