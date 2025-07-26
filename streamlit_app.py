@@ -394,11 +394,7 @@ def format_total(total_value):
     if pd.isna(total_value) or total_value is None:
         return "N/A"
     try:
-        # Check if total is an integer or float
-        if total_value == int(total_value):
-            return f"{int(total_value)}"
-        else:
-            return f"{float(total_value)}"
+        return f"{float(total_value)}"
     except (ValueError, TypeError):
         return "N/A"
 
@@ -410,7 +406,7 @@ def format_game_time(game_time_str):
             # ISO format
             dt = datetime.fromisoformat(game_time_str.replace('Z', '+00:00'))
         else:
-            # Fallback for other potential formats if needed, or just return as is if not parseable
+            # Fallback
             return game_time_str
             
         et = timezone('US/Eastern')
@@ -419,219 +415,116 @@ def format_game_time(game_time_str):
     except:
         return "TBD"
 
+def format_date(date_str):
+    """Format date for display"""
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%A, %B %d, %Y")
+    except:
+        return date_str
+
 def calculate_line_movement(opening, current):
     """Calculate line movement with color coding"""
-    if pd.isna(opening) or opening is None or pd.isna(current) or current is None:
-        return "N/A", "#666666" # Grey for N/A
     try:
-        opening_val = float(opening)
-        current_val = float(current)
+        opening_val = float(opening) if opening is not None and not pd.isna(opening) else None
+        current_val = float(current) if current is not None and not pd.isna(current) else None
+        
+        if opening_val is None or current_val is None:
+            return "N/A", "#666666"
         
         diff = current_val - opening_val
         
-        # Use a small epsilon for floating point comparisons
-        if abs(diff) < 0.001: 
-            return "No Change", "#666666" # Grey
+        if abs(diff) < 1:
+            return "No Change", "#666666"
         elif diff > 0:
             return f"+{diff:.0f}", "#28a745"  # Green
         else:
             return f"{diff:.0f}", "#dc3545"   # Red
-    except (ValueError, TypeError):
+    except:
         return "N/A", "#666666"
 
-def get_movement_class(opening, current):
-    """Returns CSS class based on line movement."""
-    _, color_hex = calculate_line_movement(opening, current)
-    if color_hex == "#28a745": # Green
-        return "movement-positive"
-    elif color_hex == "#dc3545": # Red
-        return "movement-negative"
-    else: # Grey
-        return "movement-neutral"
-
 def display_game_card(game):
-    """Display a single game with odds (FanDuel preferred) in a structured card format."""
+    """Display a single game with odds (FanDuel preferred, backup if needed)"""
     
     sportsbook = game.get('sportsbook', 'FanDuel')
     border_color = "#1f77b4" if sportsbook == 'FanDuel' else "#ff6b35"
     
-    game_time_formatted = format_game_time(game['game_time'])
-    venue = game['venue']
-
-    card_html = f"""
-    <div style="border: 2px solid {border_color}; border-radius: 12px; padding: 24px; margin-bottom: 24px; 
-                background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-        <h3 style="margin-top: 0; color: {border_color}; font-weight: bold; font-size: 1.5em;">
-            {game['away_team']} @ {game['home_team']}
-        </h3>
-        <p style="color: #666; margin-bottom: 20px; font-size: 16px;">
-            <strong>🏟️ {venue}</strong> • <strong>⏰ {game_time_formatted}</strong>
-        </p>
-
-        <style>
-            .odds-table {{
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 15px;
-                font-size: 0.9em; /* Slightly smaller font for table content */
-            }}
-            .odds-table th, .odds-table td {{
-                border: 1px solid #e0e0e0; /* Lighter border for inner table */
-                padding: 8px 6px;
-                text-align: center;
-                vertical-align: top;
-            }}
-            .odds-table th {{
-                background-color: #f2f2f2;
-                font-weight: bold;
-                color: #333;
-                position: sticky;
-                top: 0;
-                z-index: 1; /* Stay on top when scrolling within the card */
-            }}
-            .odds-table thead th:first-child {{
-                text-align: left; /* Align Team heading left */
-            }}
-            .odds-table tbody td:first-child {{
-                text-align: left; /* Align team names left */
-                font-weight: bold;
-                color: #444;
-            }}
-            .odds-table .odds-pair {{
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                gap: 2px; /* Smaller gap for compact display */
-            }}
-            .odds-table .line-value {{
-                font-weight: bold;
-                color: #1f77b4; /* FanDuel blue */
-                font-size: 1.1em;
-            }}
-            .movement-positive {{ color: #28a745; font-weight: bold; font-size: 0.8em; }} /* Green */
-            .movement-negative {{ color: #dc3545; font-weight: bold; font-size: 0.8em; }} /* Red */
-            .movement-neutral {{ color: #666666; font-size: 0.8em; }} /* Grey */
-            @media (max-width: 768px) {{
-                .odds-table {{
-                    font-size: 0.75em; /* Even smaller font on mobile */
-                }}
-                .odds-table th, .odds-table td {{
-                    padding: 6px 4px;
-                }}
-            }}
-        </style>
-
-        <table class="odds-table">
-            <thead>
-                <tr>
-                    <th rowspan="2">Team</th>
-                    <th colspan="2">Moneyline</th>
-                    <th colspan="2">Run Line</th>
-                    <th colspan="2">Total</th>
-                </tr>
-                <tr>
-                    <th>Opening</th>
-                    <th>Current</th>
-                    <th>Opening</th>
-                    <th>Current</th>
-                    <th>Opening</th>
-                    <th>Current</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>{game['away_team']}</td>
-                    <td>
-                        <div class="odds-pair">
-                            <span>{format_odds(game['ml_opening_away'])}</span>
-                        </div>
-                    </td>
-                    <td>
-                        <div class="odds-pair">
-                            <span>{format_odds(game['ml_current_away'])}</span>
-                            <span class="{get_movement_class(game['ml_opening_away'], game['ml_current_away'])}">{calculate_line_movement(game['ml_opening_away'], game['ml_current_away'])[0]}</span>
-                        </div>
-                    </td>
-                    <td>
-                        <div class="odds-pair">
-                            <span>{format_spread(game['rl_opening_away_spread'])}</span>
-                            <span>({format_odds(game['rl_opening_away_odds'])})</span>
-                        </div>
-                    </td>
-                    <td>
-                        <div class="odds-pair">
-                            <span>{format_spread(game['rl_current_away_spread'])}</span>
-                            <span>({format_odds(game['rl_current_away_odds'])})</span>
-                            <span class="{get_movement_class(game['rl_opening_away_odds'], game['rl_current_away_odds'])}">{calculate_line_movement(game['rl_opening_away_odds'], game['rl_current_away_odds'])[0]}</span>
-                        </div>
-                    </td>
-                    <td>
-                        <div class="odds-pair">
-                            <span class="line-value">O/U {format_total(game['total_opening_line'])}</span>
-                            <span>O: {format_odds(game['total_opening_over_odds'])}</span>
-                            <span>U: {format_odds(game['total_opening_under_odds'])}</span>
-                        </div>
-                    </td>
-                    <td>
-                        <div class="odds-pair">
-                            <span class="line-value">O/U {format_total(game['total_current_line'])}</span>
-                            <span>O: {format_odds(game['total_current_over_odds'])}</span>
-                            <span>U: {format_odds(game['total_current_under_odds'])}</span>
-                            <span class="{get_movement_class(game['total_opening_line'], game['total_current_line'])}">{calculate_line_movement(game['total_opening_line'], game['total_current_line'])[0]} (Line)</span>
-                            <span class="{get_movement_class(game['total_opening_over_odds'], game['total_current_over_odds'])}">{calculate_line_movement(game['total_opening_over_odds'], game['total_current_over_odds'])[0]} (O Odds)</span>
-                            <span class="{get_movement_class(game['total_opening_under_odds'], game['total_current_under_odds'])}">{calculate_line_movement(game['total_opening_under_odds'], game['total_current_under_odds'])[0]} (U Odds)</span>
-                        </div>
-                    </td>
-                </tr>
-                <tr>
-                    <td>{game['home_team']}</td>
-                    <td>
-                        <div class="odds-pair">
-                            <span>{format_odds(game['ml_opening_home'])}</span>
-                        </div>
-                    </td>
-                    <td>
-                        <div class="odds-pair">
-                            <span>{format_odds(game['ml_current_home'])}</span>
-                            <span class="{get_movement_class(game['ml_opening_home'], game['ml_current_home'])}">{calculate_line_movement(game['ml_opening_home'], game['ml_current_home'])[0]}</span>
-                        </div>
-                    </td>
-                    <td>
-                        <div class="odds-pair">
-                            <span>{format_spread(game['rl_opening_home_spread'])}</span>
-                            <span>({format_odds(game['rl_opening_home_odds'])})</span>
-                        </div>
-                    </td>
-                    <td>
-                        <div class="odds-pair">
-                            <span>{format_spread(game['rl_current_home_spread'])}</span>
-                            <span>({format_odds(game['rl_current_home_odds'])})</span>
-                            <span class="{get_movement_class(game['rl_opening_home_odds'], game['rl_current_home_odds'])}">{calculate_line_movement(game['rl_opening_home_odds'], game['rl_current_home_odds'])[0]}</span>
-                        </div>
-                    </td>
-                     <td>
-                        <div class="odds-pair">
-                            <span class="line-value">O/U {format_total(game['total_opening_line'])}</span>
-                            <span>O: {format_odds(game['total_opening_over_odds'])}</span>
-                            <span>U: {format_odds(game['total_opening_under_odds'])}</span>
-                        </div>
-                    </td>
-                    <td>
-                        <div class="odds-pair">
-                            <span class="line-value">O/U {format_total(game['total_current_line'])}</span>
-                            <span>O: {format_odds(game['total_current_over_odds'])}</span>
-                            <span>U: {format_odds(game['total_current_under_odds'])}</span>
-                            <span class="{get_movement_class(game['total_opening_line'], game['total_current_line'])}">{calculate_line_movement(game['total_opening_line'], game['total_current_line'])[0]} (Line)</span>
-                            <span class="{get_movement_class(game['total_opening_over_odds'], game['total_current_over_odds'])}">{calculate_line_movement(game['total_opening_over_odds'], game['total_current_over_odds'])[0]} (O Odds)</span>
-                            <span class="{get_movement_class(game['total_opening_under_odds'], game['total_current_under_odds'])}">{calculate_line_movement(game['total_opening_under_odds'], game['total_current_under_odds'])[0]} (U Odds)</span>
-                        </div>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
-    """
-    st.markdown(card_html, unsafe_allow_html=True)
+    with st.container():
+        st.markdown(f"""
+        <div style="border: 2px solid {border_color}; border-radius: 12px; padding: 24px; margin-bottom: 24px; 
+                    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h3 style="margin-top: 0; color: {border_color}; font-weight: bold; font-size: 1.5em;">
+                {game['away_team']} @ {game['home_team']}
+            </h3>
+            <p style="color: #666; margin-bottom: 20px; font-size: 16px;">
+                <strong>🏟️ {game['venue']}</strong> • <strong>⏰ {format_game_time(game['game_time'])}</strong>
+            </p>
+        """, unsafe_allow_html=True)
+        
+        st.markdown(f"### 📊 {sportsbook} Odds - Opening vs Current")
+        
+        # Create three columns for different bet types
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("#### 💰 Moneyline")
+            
+            # Away team moneyline
+            away_ml_move, away_ml_color = calculate_line_movement(game['ml_opening_away'], game['ml_current_away'])
+            st.markdown(f"""
+            **{game['away_team']}:**  
+            Opening: {format_odds(game['ml_opening_away'])}  
+            Current: {format_odds(game['ml_current_away'])} 
+            <span style="color: {away_ml_color}; font-weight: bold;">({away_ml_move})</span>
+            """, unsafe_allow_html=True)
+            
+            # Home team moneyline
+            home_ml_move, home_ml_color = calculate_line_movement(game['ml_opening_home'], game['ml_current_home'])
+            st.markdown(f"""
+            **{game['home_team']}:**  
+            Opening: {format_odds(game['ml_opening_home'])}  
+            Current: {format_odds(game['ml_current_home'])} 
+            <span style="color: {home_ml_color}; font-weight: bold;">({home_ml_move})</span>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("#### 🏃 Run Line")
+            
+            # Away team run line
+            st.markdown(f"""
+            **{game['away_team']} {format_spread(game['rl_opening_away_spread'])}:**  
+            Opening: {format_odds(game['rl_opening_away_odds'])}  
+            Current: {format_odds(game['rl_current_away_odds'])}
+            """, unsafe_allow_html=True)
+            
+            # Home team run line
+            st.markdown(f"""
+            **{game['home_team']} {format_spread(game['rl_opening_home_spread'])}:**  
+            Opening: {format_odds(game['rl_opening_home_odds'])}  
+            Current: {format_odds(game['rl_current_home_odds'])}
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            st.markdown("#### 🎯 Total")
+            
+            opening_total = format_total(game['total_opening_line'])
+            current_total = format_total(game['total_current_line'])
+            
+            # Over
+            st.markdown(f"""
+            **Over {opening_total} → {current_total}:**  
+            Opening: {format_odds(game['total_opening_over_odds'])}  
+            Current: {format_odds(game['total_current_over_odds'])}
+            """, unsafe_allow_html=True)
+            
+            # Under
+            st.markdown(f"""
+            **Under {opening_total} → {current_total}:**  
+            Opening: {format_odds(game['total_opening_under_odds'])}  
+            Current: {format_odds(game['total_current_under_odds'])}
+            """, unsafe_allow_html=True)
+        
+        st.markdown("</div>", unsafe_allow_html=True)
 
 def main():
     """Main Streamlit application"""
