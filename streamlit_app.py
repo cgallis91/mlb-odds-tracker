@@ -123,9 +123,57 @@ def get_fanduel_mlb_data():
                                                     line_history_model = page_props.get('lineHistoryModel', {})
                                                     debug_log.append(f"      🔍 Line history model keys: {list(line_history_model.keys())}")
                                                     
-                                                    # Get the oddsViews array - this is where all sportsbook data lives
-                                                    odds_views = line_history_model.get('oddsViews', [])
-                                                    debug_log.append(f"      🔍 Found {len(odds_views)} sportsbooks in oddsViews")
+                                                    # The structure doesn't have oddsViews at the top level - let's search deeper
+                                                    odds_views = []
+                                                    
+                                                    # First try the expected location
+                                                    top_level_odds_views = line_history_model.get('oddsViews', [])
+                                                    
+                                                    # Then try looking in lineHistory
+                                                    line_history = line_history_model.get('lineHistory', {})
+                                                    line_history_odds_views = line_history.get('oddsViews', []) if line_history else []
+                                                    
+                                                    # Use whichever one has data
+                                                    if top_level_odds_views:
+                                                        odds_views = top_level_odds_views
+                                                        debug_log.append(f"      🎯 Found oddsViews at top level with {len(odds_views)} sportsbooks")
+                                                    elif line_history_odds_views:
+                                                        odds_views = line_history_odds_views  
+                                                        debug_log.append(f"      🎯 Found oddsViews in lineHistory with {len(odds_views)} sportsbooks")
+                                                    else:
+                                                        # If neither location has it, do a recursive search
+                                                        debug_log.append(f"      🔍 No oddsViews found in expected locations, searching recursively...")
+                                                        
+                                                        def find_odds_views_recursive(obj, path=""):
+                                                            if isinstance(obj, dict):
+                                                                if 'oddsViews' in obj and isinstance(obj['oddsViews'], list):
+                                                                    return obj['oddsViews'], path + ".oddsViews"
+                                                                for key, value in obj.items():
+                                                                    result, found_path = find_odds_views_recursive(value, path + f".{key}")
+                                                                    if result:
+                                                                        return result, found_path
+                                                            elif isinstance(obj, list):
+                                                                for i, item in enumerate(obj):
+                                                                    result, found_path = find_odds_views_recursive(item, path + f"[{i}]")
+                                                                    if result:
+                                                                        return result, found_path
+                                                            return None, ""
+                                                        
+                                                        found_odds_views, found_path = find_odds_views_recursive(line_json)
+                                                        if found_odds_views:
+                                                            odds_views = found_odds_views
+                                                            debug_log.append(f"      🎯 Found oddsViews via recursive search at: {found_path}")
+                                                            debug_log.append(f"      🎯 Contains {len(odds_views)} sportsbooks!")
+                                                        else:
+                                                            debug_log.append(f"      ❌ No oddsViews found anywhere in JSON")
+                                                    
+                                                    debug_log.append(f"      🔍 Final odds_views length: {len(odds_views)}")
+                                                    
+                                                    # Debug: show first few sportsbooks if found
+                                                    if odds_views:
+                                                        for i, view in enumerate(odds_views[:3]):  # Show first 3
+                                                            sb_name = view.get('sportsbook', 'Unknown')
+                                                            debug_log.append(f"      📖 Sportsbook {i}: {sb_name}")
                                                     
                                                     # Find FanDuel data
                                                     fanduel_data = None
@@ -134,7 +182,6 @@ def get_fanduel_mlb_data():
                                                     for j, view in enumerate(odds_views):
                                                         sportsbook = view.get('sportsbook', '').lower()
                                                         available_books.append(sportsbook)
-                                                        debug_log.append(f"      📖 Sportsbook {j}: '{sportsbook}'")
                                                         
                                                         if sportsbook == 'fanduel':
                                                             fanduel_data = view
@@ -159,8 +206,10 @@ def get_fanduel_mlb_data():
                                                     
                                                     debug_log.append(f"   📚 Available sportsbooks: {available_books}")
                                                     
-                                                    if not fanduel_data:
+                                                    if not fanduel_data and odds_views:
                                                         debug_log.append(f"      ❌ FanDuel not found in available sportsbooks: {available_books}")
+                                                    elif not odds_views:
+                                                        debug_log.append(f"      ❌ No oddsViews found at all in this game's JSON")
                                                     
                                                     if fanduel_data:
                                                         # Extract odds histories
