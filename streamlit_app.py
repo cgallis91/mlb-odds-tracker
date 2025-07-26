@@ -115,10 +115,33 @@ def get_fanduel_mlb_data():
                                                 line_json = json.loads(line_match.group(1))
                                                 debug_log.append("   ✅ Found JSON in line history page")
                                                 
-                                                # Navigate to FanDuel data
+                                                # Navigate to FanDuel data - let's debug the JSON structure first
                                                 try:
-                                                    line_history_model = line_json['props']['pageProps'].get('lineHistoryModel', {})
+                                                    page_props = line_json['props']['pageProps']
+                                                    debug_log.append(f"      🔍 Page props keys: {list(page_props.keys())}")
+                                                    
+                                                    line_history_model = page_props.get('lineHistoryModel', {})
+                                                    debug_log.append(f"      🔍 Line history model keys: {list(line_history_model.keys())}")
+                                                    
                                                     odds_views = line_history_model.get('oddsViews', [])
+                                                    debug_log.append(f"      🔍 Raw odds_views length: {len(odds_views)}")
+                                                    
+                                                    # If oddsViews is empty, let's check for other possible keys
+                                                    if not odds_views:
+                                                        debug_log.append(f"      🔍 Checking for alternative structure...")
+                                                        # Check if there's a different structure
+                                                        for key in line_history_model.keys():
+                                                            if 'odds' in key.lower() or 'view' in key.lower():
+                                                                debug_log.append(f"      🔍 Found potential key: {key}")
+                                                                alt_data = line_history_model.get(key, {})
+                                                                if isinstance(alt_data, list):
+                                                                    debug_log.append(f"      🔍 {key} is a list with {len(alt_data)} items")
+                                                                elif isinstance(alt_data, dict):
+                                                                    debug_log.append(f"      🔍 {key} is a dict with keys: {list(alt_data.keys())}")
+                                                    
+                                                    # Let's also check if the structure is different
+                                                    if not odds_views and line_history_model:
+                                                        debug_log.append(f"      🔍 Full line_history_model structure: {str(line_history_model)[:500]}...")
                                                     
                                                     debug_log.append(f"   📋 Found {len(odds_views)} sportsbooks in line history")
                                                     
@@ -317,7 +340,16 @@ def load_odds_data():
     real_data, debug_log, success = get_fanduel_mlb_data()
     
     if success and not real_data.empty:
-        data_source = "🏆 SportsbookReview (Live FanDuel Data)"
+        fanduel_count = len(real_data[real_data['sportsbook'] == 'FanDuel'])
+        backup_count = len(real_data[real_data['sportsbook'] != 'FanDuel'])
+        
+        if fanduel_count > 0 and backup_count > 0:
+            data_source = f"🏆 Mixed: {fanduel_count} FanDuel + {backup_count} Other Sportsbooks"
+        elif fanduel_count > 0:
+            data_source = f"🏆 SportsbookReview ({fanduel_count} FanDuel Games)"
+        else:
+            data_source = f"📊 SportsbookReview ({backup_count} Games - No FanDuel Yet)"
+        
         final_data = real_data
     else:
         data_source = "🎲 Fallback Data (Demo Mode)"
@@ -419,13 +451,16 @@ def calculate_line_movement(opening, current):
         return "N/A", "#666666"
 
 def display_game_card(game):
-    """Display a single game with FanDuel odds"""
+    """Display a single game with odds (FanDuel preferred, backup if needed)"""
+    
+    sportsbook = game.get('sportsbook', 'FanDuel')
+    border_color = "#1f77b4" if sportsbook == 'FanDuel' else "#ff6b35"
     
     with st.container():
         st.markdown(f"""
-        <div style="border: 2px solid #1f77b4; border-radius: 12px; padding: 24px; margin-bottom: 24px; 
+        <div style="border: 2px solid {border_color}; border-radius: 12px; padding: 24px; margin-bottom: 24px; 
                     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            <h3 style="margin-top: 0; color: #1f77b4; font-weight: bold; font-size: 1.5em;">
+            <h3 style="margin-top: 0; color: {border_color}; font-weight: bold; font-size: 1.5em;">
                 {game['away_team']} @ {game['home_team']}
             </h3>
             <p style="color: #666; margin-bottom: 20px; font-size: 16px;">
@@ -433,7 +468,7 @@ def display_game_card(game):
             </p>
         """, unsafe_allow_html=True)
         
-        st.markdown("### 📊 FanDuel Odds - Opening vs Current")
+        st.markdown(f"### 📊 {sportsbook} Odds - Opening vs Current")
         
         # Create three columns for different bet types
         col1, col2, col3 = st.columns(3)
@@ -501,8 +536,8 @@ def display_game_card(game):
 def main():
     """Main Streamlit application"""
     
-    st.title("⚾ MLB FanDuel Odds Tracker")
-    st.markdown("*Live opening vs current FanDuel odds from SportsbookReview*")
+    st.title("⚾ MLB Odds Tracker (FanDuel Preferred)")
+    st.markdown("*Live opening vs current odds from SportsbookReview - FanDuel preferred, other sportsbooks as backup*")
     
     # Header with refresh button
     col1, col2 = st.columns([1, 4])
