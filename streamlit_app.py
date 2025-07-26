@@ -4,7 +4,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import time
 import logging
-from mlb_odds_scraper import MLBOddsScraper  # Import our scraper
+from comprehensive_scraper import ComprehensiveMLBScraper  # Import our comprehensive scraper
 
 # Configure page
 st.set_page_config(
@@ -54,12 +54,12 @@ st.markdown("""
 def load_odds_data():
     """Load fresh odds data with caching"""
     try:
-        scraper = MLBOddsScraper()
+        scraper = ComprehensiveMLBScraper()
         df = scraper.get_today_tomorrow_games()
-        return df, datetime.now()
+        return df, datetime.now(), "SportsbookReview (FanDuel - All Bet Types)"
     except Exception as e:
         st.error(f"Error loading data: {e}")
-        return pd.DataFrame(), datetime.now()
+        return pd.DataFrame(), datetime.now(), "Error"
 
 def format_odds(odds_value):
     """Format odds for display"""
@@ -123,7 +123,7 @@ def calculate_odds_movement(opening, current):
         return "", ""
 
 def display_game_card(row):
-    """Display a single game as a card"""
+    """Display a single game as a card with all bet types"""
     
     with st.container():
         st.markdown(f"""
@@ -144,7 +144,7 @@ def display_game_card(row):
             )
             
             st.markdown(f"""
-            **{row['away_abbr']}**: {format_odds(row['ml_opening_away'])} → 
+            **{row['away_team']}**: {format_odds(row['ml_opening_away'])} → 
             {format_odds(row['ml_current_away'])} {away_ml_movement}
             """)
             
@@ -154,46 +154,66 @@ def display_game_card(row):
             )
             
             st.markdown(f"""
-            **{row['home_abbr']}**: {format_odds(row['ml_opening_home'])} → 
+            **{row['home_team']}**: {format_odds(row['ml_opening_home'])} → 
             {format_odds(row['ml_current_home'])} {home_ml_movement}
             """)
         
         with col2:
             st.markdown("**Run Line**")
             
-            # Display spread and odds
-            spread_opening = format_spread(row['rl_opening_spread'])
-            spread_current = format_spread(row['rl_current_spread'])
+            # Display spread
+            spread_opening = format_spread(row['rl_opening_away_spread'])
+            spread_current = format_spread(row['rl_current_away_spread'])
             
             st.markdown(f"""
             **Spread**: {spread_opening} → {spread_current}
             """)
             
-            st.markdown(f"""
-            **{row['away_abbr']}**: {format_odds(row['rl_opening_away'])} → {format_odds(row['rl_current_away'])}
-            """)
+            # Away team run line odds
+            away_rl_movement, _ = calculate_odds_movement(
+                row['rl_opening_away_odds'], row['rl_current_away_odds']
+            )
             
             st.markdown(f"""
-            **{row['home_abbr']}**: {format_odds(row['rl_opening_home'])} → {format_odds(row['rl_current_home'])}
+            **{row['away_team']}**: {format_odds(row['rl_opening_away_odds'])} → {format_odds(row['rl_current_away_odds'])} {away_rl_movement}
+            """)
+            
+            # Home team run line odds
+            home_rl_movement, _ = calculate_odds_movement(
+                row['rl_opening_home_odds'], row['rl_current_home_odds']
+            )
+            
+            st.markdown(f"""
+            **{row['home_team']}**: {format_odds(row['rl_opening_home_odds'])} → {format_odds(row['rl_current_home_odds'])} {home_rl_movement}
             """)
         
         with col3:
             st.markdown("**Total**")
             
             # Display total
-            total_opening = format_total(row['total_opening'])
-            total_current = format_total(row['total_current'])
+            total_opening = format_total(row['total_opening_line'])
+            total_current = format_total(row['total_current_line'])
             
             st.markdown(f"""
             **Total**: {total_opening} → {total_current}
             """)
             
-            st.markdown(f"""
-            **Over**: {format_odds(row['total_opening_over'])} → {format_odds(row['total_current_over'])}
-            """)
+            # Over odds
+            over_movement, _ = calculate_odds_movement(
+                row['total_opening_over_odds'], row['total_current_over_odds']
+            )
             
             st.markdown(f"""
-            **Under**: {format_odds(row['total_opening_under'])} → {format_odds(row['total_current_under'])}
+            **Over**: {format_odds(row['total_opening_over_odds'])} → {format_odds(row['total_current_over_odds'])} {over_movement}
+            """)
+            
+            # Under odds
+            under_movement, _ = calculate_odds_movement(
+                row['total_opening_under_odds'], row['total_current_under_odds']
+            )
+            
+            st.markdown(f"""
+            **Under**: {format_odds(row['total_opening_under_odds'])} → {format_odds(row['total_current_under_odds'])} {under_movement}
             """)
         
         st.divider()
@@ -218,14 +238,19 @@ def main():
     
     # Load data
     with st.spinner("Loading latest odds..."):
-        games_df, last_update = load_odds_data()
+        games_df, last_update, data_source = load_odds_data()
     
-    # Display last update time
+    # Display last update time and source
+    source_emoji = {
+        'SportsbookReview (FanDuel - All Bet Types)': '🏆',
+        'Error': '❌'
+    }
+    
     st.markdown(f"""
     <div class="refresh-info">
     📊 <strong>Last Updated:</strong> {last_update.strftime('%I:%M:%S %p')} | 
     <strong>Games Found:</strong> {len(games_df)} | 
-    <strong>Source:</strong> SportsbookReview.com (FanDuel)
+    <strong>Source:</strong> {source_emoji.get(data_source, '📡')} {data_source}
     </div>
     """, unsafe_allow_html=True)
     
