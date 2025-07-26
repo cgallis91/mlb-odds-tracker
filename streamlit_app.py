@@ -173,11 +173,23 @@ class ComprehensiveMLBScraper:
             'current': {}
         }
         
+        # Debug: Check what's in opening_line_views
+        print(f"Debug - {bet_type}: Found {len(opening_line_views)} opening line views")
+        
         # Find FanDuel data
-        for odds_view in opening_line_views:
-            if odds_view.get('sportsbook', '').lower() == 'fanduel':
+        fanduel_found = False
+        for i, odds_view in enumerate(opening_line_views):
+            sportsbook = odds_view.get('sportsbook', '')
+            print(f"Debug - View {i}: sportsbook = '{sportsbook}'")
+            
+            if sportsbook.lower() == 'fanduel':
+                fanduel_found = True
                 opening_line = odds_view.get('openingLine', {})
                 current_line = odds_view.get('currentLine', {})
+                
+                print(f"Debug - FanDuel found for {bet_type}")
+                print(f"Debug - Opening line keys: {list(opening_line.keys())}")
+                print(f"Debug - Current line keys: {list(current_line.keys())}")
                 
                 if bet_type == 'moneyline':
                     odds_data['opening'] = {
@@ -188,6 +200,8 @@ class ComprehensiveMLBScraper:
                         'away_odds': current_line.get('awayOdds'),
                         'home_odds': current_line.get('homeOdds')
                     }
+                    print(f"Debug - ML Opening: away={opening_line.get('awayOdds')}, home={opening_line.get('homeOdds')}")
+                    print(f"Debug - ML Current: away={current_line.get('awayOdds')}, home={current_line.get('homeOdds')}")
                 
                 elif bet_type == 'pointspread':
                     odds_data['opening'] = {
@@ -202,6 +216,8 @@ class ComprehensiveMLBScraper:
                         'away_spread': current_line.get('awaySpread'),
                         'home_spread': current_line.get('homeSpread')
                     }
+                    print(f"Debug - PS Opening: away_spread={opening_line.get('awaySpread')}, away_odds={opening_line.get('awayOdds')}")
+                    print(f"Debug - PS Current: away_spread={current_line.get('awaySpread')}, away_odds={current_line.get('awayOdds')}")
                 
                 elif bet_type == 'totals':
                     odds_data['opening'] = {
@@ -214,8 +230,13 @@ class ComprehensiveMLBScraper:
                         'under_odds': current_line.get('underOdds'),
                         'total': current_line.get('total')
                     }
+                    print(f"Debug - Total Opening: total={opening_line.get('total')}, over={opening_line.get('overOdds')}")
+                    print(f"Debug - Total Current: total={current_line.get('total')}, over={current_line.get('overOdds')}")
                 
                 break
+        
+        if not fanduel_found:
+            print(f"Debug - No FanDuel found for {bet_type}")
         
         return odds_data
     
