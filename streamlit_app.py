@@ -419,8 +419,16 @@ def format_game_time(game_time_str):
     except:
         return "TBD"
 
+def format_date(date_str):
+    """Format date for display"""
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%A, %B %d, %Y")
+    except:
+        return date_str
+
 def calculate_line_movement(opening, current):
-    """Calculate line movement with color coding"""
+    """Calculate line movement with color coding and return text and color hex."""
     if pd.isna(opening) or opening is None or pd.isna(current) or current is None:
         return "N/A", "#666666" # Grey for N/A
     try:
@@ -622,90 +630,3 @@ def display_game_card(game):
                             <span>O: {format_odds(game['total_current_over_odds'])}</span>
                             <span>U: {format_odds(game['total_current_under_odds'])}</span>
                             <span class="{get_movement_class(game['total_opening_line'], game['total_current_line'])}">{calculate_line_movement(game['total_opening_line'], game['total_current_line'])[0]} (Line)</span>
-                            <span class="{get_movement_class(game['total_opening_over_odds'], game['total_current_over_odds'])}">{calculate_line_movement(game['total_opening_over_odds'], game['total_current_over_odds'])[0]} (O Odds)</span>
-                            <span class="{get_movement_class(game['total_opening_under_odds'], game['total_current_under_odds'])}">{calculate_line_movement(game['total_opening_under_odds'], game['total_current_under_odds'])[0]} (U Odds)</span>
-                        </div>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
-    """
-    st.markdown(card_html, unsafe_allow_html=True)
-
-def main():
-    """Main Streamlit application"""
-    
-    st.title("⚾ MLB FanDuel Odds Tracker")
-    st.markdown("*Live opening vs current FanDuel odds from SportsbookReview*")
-    
-    # Header with refresh button
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        if st.button("🔄 Refresh Data", type="primary"):
-            st.cache_data.clear()
-            st.rerun()
-    
-    with col2:
-        st.markdown("*Data updates every 5 minutes*")
-    
-    # Load data with spinner
-    with st.spinner("🔍 Scraping FanDuel odds for today and tomorrow..."):
-        data = load_odds_data()
-    
-    # Extract data
-    today_df = data['today']
-    tomorrow_df = data['tomorrow']
-    today_date = data['today_date']
-    tomorrow_date = data['tomorrow_date']
-    last_update = data['last_update']
-    data_source = data['data_source']
-    debug_log = data['debug_log']
-    scraper_success = data['scraper_success']
-    
-    # Status banner
-    status_color = "#28a745" if scraper_success else "#dc3545"
-    status_text_color = "white"
-    
-    st.markdown(f"""
-    <div style="background-color: {status_color}; color: {status_text_color}; padding: 1rem; 
-                border-radius: 8px; margin-bottom: 1.5rem; text-align: center; font-weight: bold;">
-    📊 <strong>Last Updated:</strong> {last_update.strftime('%I:%M:%S %p ET')} | 
-    <strong>Source:</strong> {data_source} | 
-    <strong>Today:</strong> {len(today_df)} games | 
-    <strong>Tomorrow:</strong> {len(tomorrow_df)} games
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Debug information (collapsible)
-    with st.expander("🔍 Scraper Debug Log"):
-        st.markdown("**Detailed scraping process:**")
-        for log_entry in debug_log:
-            st.text(log_entry)
-    
-    # Create tabs for today and tomorrow
-    tab1, tab2 = st.tabs([
-        f"📅 Today - {format_date(today_date)}", 
-        f"📅 Tomorrow - {format_date(tomorrow_date)}"
-    ])
-    
-    # Today's games
-    with tab1:
-        if not today_df.empty:
-            st.markdown(f"### {len(today_df)} Games Today with FanDuel Odds")
-            for _, game in today_df.iterrows():
-                display_game_card(game)
-        else:
-            st.info("📅 No games with FanDuel odds found for today")
-    
-    # Tomorrow's games  
-    with tab2:
-        if not tomorrow_df.empty:
-            st.markdown(f"### {len(tomorrow_df)} Games Tomorrow with FanDuel Odds")
-            for _, game in tomorrow_df.iterrows():
-                display_game_card(game)
-        else:
-            st.info("📅 No games with FanDuel odds found for tomorrow")
-
-if __name__ == "__main__":
-    main()
