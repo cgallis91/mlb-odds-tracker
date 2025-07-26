@@ -16,17 +16,61 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- DATA LOADING AND FORMATTING HELPERS (unchanged) ---
-
 def get_fanduel_mlb_data():
-    # ...existing code...
-    # (Keep your scraping/data logic unchanged here)
-    pass  # Placeholder for your existing function
+    # ...your existing scraping logic here...
+    # (This function is unchanged from your original file)
+    debug_log = []
+    debug_log.append("🎯 Starting FanDuel MLB scraper for today and tomorrow...")
+    session = requests.Session()
+    session.headers.update({
+        'Accept-Encoding': 'identity',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+    })
+    et = timezone('US/Eastern')
+    now_et = datetime.now(et)
+    today = now_et.strftime("%Y-%m-%d")
+    tomorrow = (now_et + timedelta(days=1)).strftime("%Y-%m-%d")
+    debug_log.append(f"📅 Today (ET): {today}")
+    debug_log.append(f"📅 Tomorrow (ET): {tomorrow}")
+    all_games = []
+    # ...rest of your scraping logic...
+    # (Copy your full get_fanduel_mlb_data function here)
+    # For brevity, not repeated in this snippet
+
+    # At the end, return as before:
+    # return pd.DataFrame(all_games), debug_log, True/False
+
+    # (Paste your full function here)
 
 @st.cache_data(ttl=300)
 def load_odds_data():
-    # ...existing code...
-    pass  # Placeholder for your existing function
+    real_data, debug_log, success = get_fanduel_mlb_data()
+    if success and not real_data.empty:
+        data_source = "SportsBookReview"
+        final_data = real_data
+    else:
+        data_source = "No Data Found"
+        final_data = pd.DataFrame()
+    et = timezone('US/Eastern')
+    now_et = datetime.now(et)
+    today = now_et.strftime("%Y-%m-%d")
+    tomorrow = (now_et + timedelta(days=1)).strftime("%Y-%m-%d")
+    today_games = final_data[final_data['date'] == today] if not final_data.empty else pd.DataFrame()
+    tomorrow_games = final_data[final_data['date'] == tomorrow] if not final_data.empty else pd.DataFrame()
+    return {
+        'today': today_games,
+        'tomorrow': tomorrow_games,
+        'today_date': today,
+        'tomorrow_date': tomorrow,
+        'last_update': now_et,
+        'data_source': data_source,
+        'debug_log': debug_log,
+        'scraper_success': success
+    }
 
 def format_odds(odds_value):
     if pd.isna(odds_value) or odds_value is None:
@@ -73,15 +117,12 @@ def format_date(date_str):
     except:
         return date_str
 
-# --- UI HELPERS ---
-
 def display_game_card(game):
-    """Display a single game in a modern card with grouped odds table."""
     border_color = "#1f77b4"
     away_team = game.get('away_team', 'Away')
     home_team = game.get('home_team', 'Home')
     venue = game.get('venue', '')
-    city = ""  # If you have city info, add it here
+    city = ""  # Add city if available
     game_time = format_game_time(game.get('game_time', 'TBD'))
 
     def fmt(val, fn=str):
@@ -178,21 +219,22 @@ def display_game_card(game):
         unsafe_allow_html=True
     )
 
-# --- MAIN APP ---
-
 def main():
-    # Header with refresh button
-    col1, col2 = st.columns([1, 6])
-    with col1:
-        if st.button("Refresh Data"):
-            st.cache_data.clear()
-            st.rerun()
-    with col2:
-        pass  # No auto-update message
+    st.title("⚾ MLB FanDuel Odds Tracker")
 
-    # Load data
+    # Refresh Data button at the top
+    if st.button("Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
+    # Load data with spinner
     with st.spinner("Loading MLB odds..."):
         data = load_odds_data()
+
+    # --- Defensive check for data ---
+    if not data or not isinstance(data, dict):
+        st.error("Failed to load odds data. Please try refreshing.")
+        return
 
     today_df = data['today']
     tomorrow_df = data['tomorrow']
