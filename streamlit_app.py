@@ -4,7 +4,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import time
 import logging
-from comprehensive_scraper import ComprehensiveMLBScraper  # Import our comprehensive scraper
+from mlb_odds_scraper import ComprehensiveMLBScraper  # Import our comprehensive scraper
 
 # Configure page
 st.set_page_config(
