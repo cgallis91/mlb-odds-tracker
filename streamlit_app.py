@@ -14,11 +14,31 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-def get_real_mlb_data_with_debug():
-    """Try to get real MLB data and return debug info for display"""
+def get_game_line_history(game_id, session):
+    """Get line history for a specific game"""
+    
+    url = f"https://www.sportsbookreview.com/betting-odds/mlb-baseball/line-history/{game_id}/"
+    
+    try:
+        response = session.get(url, timeout=30)
+        if response.status_code == 200:
+            # Extract JSON from line history page
+            pattern = r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>'
+            match = re.search(pattern, response.text, re.DOTALL)
+            
+            if match:
+                json_data = json.loads(match.group(1))
+                return json_data
+        
+        return None
+    except:
+        return None
+
+def get_real_mlb_data_with_line_history():
+    """Get MLB data using line history approach for FanDuel data"""
     
     debug_log = []
-    debug_log.append("🧪 Attempting to scrape real MLB data...")
+    debug_log.append("🧪 Attempting to scrape MLB data with line history approach...")
     
     session = requests.Session()
     session.headers.update({
@@ -26,36 +46,28 @@ def get_real_mlb_data_with_debug():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     })
     
-    # Try multiple dates to find FanDuel data
     today = datetime.now().strftime("%Y-%m-%d")
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    dates_to_try = [today, yesterday, tomorrow]
     
     all_games = []
     
-    for date_str in dates_to_try:
-        debug_log.append(f"\n📅 Trying date: {date_str}")
+    for date_str in [today, tomorrow]:
+        debug_log.append(f"\n📅 Processing date: {date_str}")
         
         try:
-            # Test moneyline URL
+            # Get main games list first
             url = f"https://www.sportsbookreview.com/betting-odds/mlb-baseball/?date={date_str}"
-            debug_log.append(f"📡 Trying: {url}")
+            debug_log.append(f"📡 Getting games list: {url}")
             
             response = session.get(url, timeout=30)
-            debug_log.append(f"📊 Response status: {response.status_code}")
             
             if response.status_code == 200:
-                # Extract JSON
                 pattern = r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>'
                 match = re.search(pattern, response.text, re.DOTALL)
                 
                 if match:
-                    debug_log.append("✅ Found __NEXT_DATA__ script")
                     json_data = json.loads(match.group(1))
                     
-                    # Navigate to games
                     odds_tables = json_data['props']['pageProps']['oddsTables']
                     if odds_tables:
                         odds_table_model = odds_tables[0]['oddsTableModel']
@@ -63,122 +75,207 @@ def get_real_mlb_data_with_debug():
                         
                         debug_log.append(f"✅ Found {len(game_rows)} games for {date_str}")
                         
-                        # Check what sportsbooks are available
-                        sportsbooks = odds_table_model.get('sportsbooks', [])
-                        debug_log.append(f"📚 Available sportsbooks for {date_str}:")
-                        for sb in sportsbooks:
-                            debug_log.append(f"   - {sb.get('name', 'Unknown')} (ID: {sb.get('sportsbookId', 'Unknown')})")
-                        
-                        if game_rows:
-                            # Check first game for FanDuel data
-                            first_game = game_rows[0]
-                            opening_line_views = first_game.get('openingLineViews', [])
-                            
-                            debug_log.append(f"🔍 Checking first game for FanDuel...")
-                            fanduel_found_in_date = False
-                            
-                            for view in opening_line_views:
-                                sportsbook = view.get('sportsbook', 'Unknown')
-                                if sportsbook.lower() == 'fanduel':
-                                    fanduel_found_in_date = True
-                                    debug_log.append(f"✅ FanDuel found for {date_str}!")
-                                    break
+                        # Process first few games to test line history approach
+                        for i, game in enumerate(game_rows[:3]):  # Test with first 3 games
+                            try:
+                                game_view = game.get('gameView', {})
+                                game_id = game_view.get('gameId')
+                                
+                                away_team = game_view.get('awayTeam', {})
+                                home_team = game_view.get('homeTeam', {})
+                                
+                                away_name = away_team.get('name', 'Unknown')
+                                home_name = home_team.get('name', 'Unknown')
+                                
+                                debug_log.append(f"\n🎮 Game {i+1}: {away_name} @ {home_name} (ID: {game_id})")
+                                
+                                if game_id:
+                                    # Try to get line history for this game
+                                    debug_log.append(f"   📈 Getting line history for game {game_id}...")
+                                    
+                                    line_history_data = get_game_line_history(game_id, session)
+                                    
+                                    if line_history_data:
+                                        debug_log.append(f"   ✅ Got line history data")
+                                        
+                                        # Try to extract FanDuel data from line history
+                                        fanduel_data = extract_fanduel_from_line_history(line_history_data, debug_log)
+                                        
+                                        if fanduel_data:
+                                            game_info = {
+                                                'date': date_str,
+                                                'away_team': away_name,
+                                                'home_team': home_name,
+                                                'game_time': game_view.get('startDate', 'TBD'),
+                                                'venue': game_view.get('venueName', 'Unknown'),
+                                                'game_id': game_id
+                                            }
+                                            
+                                            # Add FanDuel odds
+                                            game_info.update(fanduel_data)
+                                            
+                                            debug_log.append(f"   💰 FanDuel ML: {fanduel_data.get('ml_opening_away')}/{fanduel_data.get('ml_opening_home')} → {fanduel_data.get('ml_current_away')}/{fanduel_data.get('ml_current_home')}")
+                                            
+                                            all_games.append(game_info)
+                                        else:
+                                            debug_log.append(f"   ❌ No FanDuel data in line history")
+                                    else:
+                                        debug_log.append(f"   ❌ Could not get line history")
                                 else:
-                                    debug_log.append(f"   Found: {sportsbook}")
-                            
-                            if fanduel_found_in_date:
-                                # Process all games for this date
-                                debug_log.append(f"🎯 Processing all games for {date_str} (FanDuel available)")
-                                
-                                for i, game in enumerate(game_rows):
-                                    try:
-                                        game_view = game.get('gameView', {})
-                                        opening_line_views = game.get('openingLineViews', [])
-                                        
-                                        away_team = game_view.get('awayTeam', {})
-                                        home_team = game_view.get('homeTeam', {})
-                                        
-                                        away_name = away_team.get('name', 'Unknown')
-                                        home_name = home_team.get('name', 'Unknown')
-                                        
-                                        game_info = {
-                                            'date': date_str,
-                                            'away_team': away_name,
-                                            'home_team': home_name,
-                                            'game_time': game_view.get('startDate', 'TBD'),
-                                            'venue': game_view.get('venueName', 'Unknown'),
-                                        }
-                                        
-                                        # Initialize all odds as None
-                                        for field in ['ml_opening_away', 'ml_opening_home', 'ml_current_away', 'ml_current_home',
-                                                     'rl_opening_away_odds', 'rl_opening_home_odds', 'rl_opening_away_spread', 'rl_opening_home_spread',
-                                                     'rl_current_away_odds', 'rl_current_home_odds', 'rl_current_away_spread', 'rl_current_home_spread',
-                                                     'total_opening_line', 'total_opening_over_odds', 'total_opening_under_odds',
-                                                     'total_current_line', 'total_current_over_odds', 'total_current_under_odds']:
-                                            game_info[field] = None
-                                        
-                                        # Extract FanDuel data
-                                        for view in opening_line_views:
-                                            if view.get('sportsbook', '').lower() == 'fanduel':
-                                                opening_line = view.get('openingLine', {})
-                                                current_line = view.get('currentLine', {})
-                                                
-                                                # Moneyline data
-                                                game_info['ml_opening_away'] = opening_line.get('awayOdds')
-                                                game_info['ml_opening_home'] = opening_line.get('homeOdds')
-                                                game_info['ml_current_away'] = current_line.get('awayOdds')
-                                                game_info['ml_current_home'] = current_line.get('homeOdds')
-                                                
-                                                # Run line data (if available)
-                                                game_info['rl_opening_away_spread'] = opening_line.get('awaySpread')
-                                                game_info['rl_opening_home_spread'] = opening_line.get('homeSpread')
-                                                if opening_line.get('awaySpread') is not None:
-                                                    game_info['rl_opening_away_odds'] = opening_line.get('awayOdds')
-                                                    game_info['rl_opening_home_odds'] = opening_line.get('homeOdds')
-                                                
-                                                game_info['rl_current_away_spread'] = current_line.get('awaySpread')
-                                                game_info['rl_current_home_spread'] = current_line.get('homeSpread')
-                                                if current_line.get('awaySpread') is not None:
-                                                    game_info['rl_current_away_odds'] = current_line.get('awayOdds')
-                                                    game_info['rl_current_home_odds'] = current_line.get('homeOdds')
-                                                
-                                                # Totals data (if available)
-                                                game_info['total_opening_line'] = opening_line.get('total')
-                                                game_info['total_opening_over_odds'] = opening_line.get('overOdds')
-                                                game_info['total_opening_under_odds'] = opening_line.get('underOdds')
-                                                
-                                                game_info['total_current_line'] = current_line.get('total')
-                                                game_info['total_current_over_odds'] = current_line.get('overOdds')
-                                                game_info['total_current_under_odds'] = current_line.get('underOdds')
-                                                
-                                                break
-                                        
-                                        all_games.append(game_info)
-                                        
-                                    except Exception as e:
-                                        debug_log.append(f"❌ Error processing game {i}: {str(e)}")
-                                        continue
-                                
-                                debug_log.append(f"✅ Processed {len(game_rows)} games from {date_str}")
-                                
-                            else:
-                                debug_log.append(f"❌ No FanDuel data found for {date_str}")
+                                    debug_log.append(f"   ❌ No game ID found")
+                                    
+                            except Exception as e:
+                                debug_log.append(f"   💥 Error processing game {i}: {str(e)}")
+                                continue
                     else:
-                        debug_log.append(f"❌ No odds tables found for {date_str}")
+                        debug_log.append(f"❌ No odds tables for {date_str}")
                 else:
-                    debug_log.append(f"❌ No __NEXT_DATA__ script found for {date_str}")
+                    debug_log.append(f"❌ No JSON data for {date_str}")
             else:
-                debug_log.append(f"❌ Bad response status for {date_str}: {response.status_code}")
+                debug_log.append(f"❌ Bad response for {date_str}: {response.status_code}")
                 
         except Exception as e:
-            debug_log.append(f"❌ Error scraping {date_str}: {str(e)}")
+            debug_log.append(f"❌ Error processing {date_str}: {str(e)}")
     
     if all_games:
-        debug_log.append(f"\n🎉 SUCCESS: Found {len(all_games)} total games with FanDuel data")
+        debug_log.append(f"\n🎉 SUCCESS: Found {len(all_games)} games with FanDuel data using line history")
         return pd.DataFrame(all_games), debug_log, True
     else:
-        debug_log.append(f"\n❌ FAILED: No FanDuel data found on any date")
+        debug_log.append(f"\n❌ FAILED: No FanDuel data found using line history approach")
         return pd.DataFrame(), debug_log, False
+
+def extract_fanduel_from_line_history(line_history_data, debug_log):
+    """Extract FanDuel data from line history JSON"""
+    
+    try:
+        # Navigate through line history structure
+        page_props = line_history_data.get('props', {}).get('pageProps', {})
+        
+        debug_log.append(f"     📊 Line history keys: {list(page_props.keys())}")
+        
+        # Look for different possible structures
+        if 'lineHistory' in page_props:
+            line_history = page_props['lineHistory']
+            debug_log.append(f"     📈 Found lineHistory section")
+            
+            # Look for FanDuel in the line history
+            if isinstance(line_history, dict):
+                for key, value in line_history.items():
+                    if 'fanduel' in key.lower():
+                        debug_log.append(f"     ✅ Found FanDuel section: {key}")
+                        return process_fanduel_line_data(value, debug_log)
+            
+        # Look for odds data
+        if 'oddsData' in page_props:
+            odds_data = page_props['oddsData']
+            debug_log.append(f"     📊 Found oddsData section")
+            
+            # Search for FanDuel in odds data
+            return search_for_fanduel_in_data(odds_data, debug_log)
+        
+        # Look for any other structure that might contain sportsbook data
+        for key, value in page_props.items():
+            if isinstance(value, dict) or isinstance(value, list):
+                fanduel_data = search_for_fanduel_in_data(value, debug_log, key)
+                if fanduel_data:
+                    return fanduel_data
+        
+        debug_log.append(f"     ❌ No FanDuel data structure found")
+        return None
+        
+    except Exception as e:
+        debug_log.append(f"     💥 Error extracting FanDuel data: {str(e)}")
+        return None
+
+def search_for_fanduel_in_data(data, debug_log, section_name="data"):
+    """Recursively search for FanDuel data in any structure"""
+    
+    try:
+        if isinstance(data, dict):
+            # Check if this dict has FanDuel info
+            for key, value in data.items():
+                if 'fanduel' in str(key).lower():
+                    debug_log.append(f"     ✅ Found FanDuel key in {section_name}: {key}")
+                    return process_fanduel_line_data(value, debug_log)
+                
+                # Check if value contains sportsbook info
+                if isinstance(value, dict) and 'sportsbook' in value:
+                    if 'fanduel' in str(value.get('sportsbook', '')).lower():
+                        debug_log.append(f"     ✅ Found FanDuel sportsbook in {section_name}")
+                        return process_fanduel_line_data(value, debug_log)
+                
+                # Recurse into nested structures
+                if isinstance(value, (dict, list)):
+                    result = search_for_fanduel_in_data(value, debug_log, f"{section_name}.{key}")
+                    if result:
+                        return result
+        
+        elif isinstance(data, list):
+            for i, item in enumerate(data):
+                if isinstance(item, (dict, list)):
+                    result = search_for_fanduel_in_data(item, debug_log, f"{section_name}[{i}]")
+                    if result:
+                        return result
+        
+        return None
+        
+    except:
+        return None
+
+def process_fanduel_line_data(fanduel_data, debug_log):
+    """Process FanDuel data once found"""
+    
+    try:
+        debug_log.append(f"     🔄 Processing FanDuel data structure...")
+        
+        # Initialize odds structure
+        odds_data = {}
+        for field in ['ml_opening_away', 'ml_opening_home', 'ml_current_away', 'ml_current_home',
+                     'rl_opening_away_odds', 'rl_opening_home_odds', 'rl_opening_away_spread', 'rl_opening_home_spread',
+                     'rl_current_away_odds', 'rl_current_home_odds', 'rl_current_away_spread', 'rl_current_home_spread',
+                     'total_opening_line', 'total_opening_over_odds', 'total_opening_under_odds',
+                     'total_current_line', 'total_current_over_odds', 'total_current_under_odds']:
+            odds_data[field] = None
+        
+        # Try to extract odds from various possible structures
+        if isinstance(fanduel_data, dict):
+            # Look for opening and current line structures
+            if 'openingLine' in fanduel_data and 'currentLine' in fanduel_data:
+                opening = fanduel_data['openingLine']
+                current = fanduel_data['currentLine']
+                
+                # Extract moneyline
+                if 'awayOdds' in opening:
+                    odds_data['ml_opening_away'] = opening.get('awayOdds')
+                    odds_data['ml_opening_home'] = opening.get('homeOdds')
+                    odds_data['ml_current_away'] = current.get('awayOdds')
+                    odds_data['ml_current_home'] = current.get('homeOdds')
+                
+                # Extract run line
+                if 'awaySpread' in opening:
+                    odds_data['rl_opening_away_spread'] = opening.get('awaySpread')
+                    odds_data['rl_opening_home_spread'] = opening.get('homeSpread')
+                    odds_data['rl_current_away_spread'] = current.get('awaySpread')
+                    odds_data['rl_current_home_spread'] = current.get('homeSpread')
+                
+                # Extract totals
+                if 'total' in opening:
+                    odds_data['total_opening_line'] = opening.get('total')
+                    odds_data['total_opening_over_odds'] = opening.get('overOdds')
+                    odds_data['total_opening_under_odds'] = opening.get('underOdds')
+                    odds_data['total_current_line'] = current.get('total')
+                    odds_data['total_current_over_odds'] = current.get('overOdds')
+                    odds_data['total_current_under_odds'] = current.get('underOdds')
+                
+                debug_log.append(f"     ✅ Extracted FanDuel odds successfully")
+                return odds_data
+        
+        debug_log.append(f"     ❌ Could not parse FanDuel data structure")
+        return None
+        
+    except Exception as e:
+        debug_log.append(f"     💥 Error processing FanDuel data: {str(e)}")
+        return None
 
 def create_fallback_data():
     """Create realistic fallback data"""
@@ -198,21 +295,6 @@ def create_fallback_data():
             'rl_current_away_spread': 1.5, 'rl_current_home_spread': -1.5,
             'total_opening_line': 8.0, 'total_opening_over_odds': -115, 'total_opening_under_odds': -105,
             'total_current_line': 8.0, 'total_current_over_odds': -102, 'total_current_under_odds': -120
-        },
-        {
-            'date': '2025-07-25',
-            'away_team': 'Arizona',
-            'home_team': 'Pittsburgh',
-            'game_time': '2025-07-25T22:40:00+00:00',
-            'venue': 'PNC Park',
-            'ml_opening_away': -136, 'ml_opening_home': 116,
-            'ml_current_away': -118, 'ml_current_home': -108,
-            'rl_opening_away_odds': 122, 'rl_opening_home_odds': -146,
-            'rl_opening_away_spread': -1.5, 'rl_opening_home_spread': 1.5,
-            'rl_current_away_odds': 142, 'rl_current_home_odds': -192,
-            'rl_current_away_spread': -1.5, 'rl_current_home_spread': 1.5,
-            'total_opening_line': 9.0, 'total_opening_over_odds': -110, 'total_opening_under_odds': -110,
-            'total_current_line': 8.5, 'total_current_over_odds': -132, 'total_current_under_odds': 100
         }
     ]
     
@@ -220,13 +302,13 @@ def create_fallback_data():
 
 @st.cache_data(ttl=300)
 def load_odds_data():
-    """Load odds data with debug info"""
+    """Load odds data with line history approach"""
     
-    # Try real data first
-    real_data, debug_log, success = get_real_mlb_data_with_debug()
+    # Try line history approach
+    real_data, debug_log, success = get_real_mlb_data_with_line_history()
     
     if success and not real_data.empty:
-        data_source = "🏆 SportsbookReview (FanDuel Live)"
+        data_source = "🏆 SportsbookReview Line History (FanDuel)"
         final_data = real_data
     else:
         data_source = "🎲 Fallback Data (Demo)"
@@ -342,7 +424,7 @@ def display_game_card(game):
 
 def main():
     st.title("⚾ MLB Odds Tracker - FanDuel Lines")
-    st.markdown("*Real-time opening vs current odds*")
+    st.markdown("*Real-time opening vs current odds using line history*")
     
     # Refresh button
     if st.button("🔄 Refresh Data", type="primary"):
@@ -350,7 +432,7 @@ def main():
         st.rerun()
     
     # Load data
-    with st.spinner("Loading latest odds..."):
+    with st.spinner("Loading latest odds using line history..."):
         data = load_odds_data()
     
     today_df = data['today']
@@ -374,8 +456,8 @@ def main():
     """, unsafe_allow_html=True)
     
     # Show debug info in expandable section
-    with st.expander("🔍 Debug Information (Click to see what's happening)"):
-        st.markdown("**Scraper Debug Log:**")
+    with st.expander("🔍 Debug Information (Line History Approach)"):
+        st.markdown("**Line History Debug Log:**")
         for log_entry in debug_log:
             st.text(log_entry)
     
