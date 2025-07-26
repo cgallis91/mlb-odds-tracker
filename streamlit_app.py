@@ -136,25 +136,31 @@ def get_fanduel_mlb_data():
                                                         debug_log.append(f"      🔍 Sportsbooks array length: {len(sportsbooks)}")
                                                         
                                                         if sportsbooks:
-                                                            debug_log.append(f"      🔍 Available sportsbooks: {sportsbooks}")
+                                                            sportsbook_names = [sb.get('slug', '').lower() if isinstance(sb, dict) else str(sb).lower() for sb in sportsbooks]
+                                                            debug_log.append(f"      🔍 Available sportsbook names: {sportsbook_names}")
                                                             
                                                             # Check if FanDuel is in the sportsbooks list
-                                                            if 'fanduel' in [sb.lower() for sb in sportsbooks]:
+                                                            if 'fanduel' in sportsbook_names:
                                                                 debug_log.append(f"      ✅ FanDuel found in sportsbooks list!")
                                                                 
                                                                 # Try to find odds data in lineHistory
                                                                 line_history = line_history_model.get('lineHistory', {})
                                                                 debug_log.append(f"      🔍 lineHistory keys: {list(line_history.keys())}")
                                                                 
-                                                                # Look for odds data structure
-                                                                for key in line_history.keys():
-                                                                    if 'odds' in key.lower() or 'line' in key.lower():
-                                                                        debug_log.append(f"      🔍 Found potential odds key: {key}")
-                                                                        odds_data = line_history.get(key, {})
-                                                                        if isinstance(odds_data, dict):
-                                                                            debug_log.append(f"      🔍 {key} sub-keys: {list(odds_data.keys())}")
-                                                                        elif isinstance(odds_data, list):
-                                                                            debug_log.append(f"      🔍 {key} is list with {len(odds_data)} items")
+                                                                # Check if there's an oddsViews in lineHistory (different from top level)
+                                                                line_odds_views = line_history.get('oddsViews', [])
+                                                                if line_odds_views:
+                                                                    debug_log.append(f"      🎯 Found oddsViews in lineHistory with {len(line_odds_views)} items")
+                                                                    
+                                                                    # Look for FanDuel in line history odds views
+                                                                    for odds_view in line_odds_views:
+                                                                        sportsbook_name = odds_view.get('sportsbook', '').lower()
+                                                                        if sportsbook_name == 'fanduel':
+                                                                            debug_log.append(f"      🎯 FOUND FANDUEL ODDS DATA!")
+                                                                            debug_log.append(f"      📊 FanDuel data: {str(odds_view)[:300]}...")
+                                                                            break
+                                                                else:
+                                                                    debug_log.append(f"      ❌ No oddsViews in lineHistory - odds not posted yet")
                                                             else:
                                                                 debug_log.append(f"      ❌ FanDuel not in sportsbooks list")
                                                         else:
