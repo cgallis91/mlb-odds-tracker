@@ -1,49 +1,4 @@
-                                # Extract sportsbook data (try FanDuel first, then BetMGM)
-                                fanduel_found = False
-                                betmgm_found = False
-                                
-                                for j, view in enumerate(opening_line_views):
-                                    sportsbook = view.get('sportsbook', 'Unknown')
-                                    debug_log.append(f"   View {j}: sportsbook = '{sportsbook}'")
-                                    
-                                    # Try FanDuel first
-                                    if sportsbook.lower() == 'fanduel':
-                                        fanduel_found = True
-                                        opening_line = view.get('openingLine', {})
-                                        current_line = view.get('currentLine', {})
-                                        
-                                        debug_log.append(f"   ✅ FanDuel found!")
-                                        
-                                        # Extract FanDuel data
-                                        ml_opening_away = opening_line.get('awayOdds')
-                                        ml_opening_home = opening_line.get('homeOdds')
-                                        ml_current_away = current_line.get('awayOdds')
-                                        ml_current_home = current_line.get('homeOdds')
-                                        
-                                        game_info['ml_opening_away'] = ml_opening_away
-                                        game_info['ml_opening_home'] = ml_opening_home
-                                        game_info['ml_current_away'] = ml_current_away
-                                        game_info['ml_current_home'] = ml_current_home
-                                        
-                                        # Try to get run line and totals from FanDuel
-                                        game_info['rl_opening_away_spread'] = opening_line.get('awaySpread')
-                                        game_info['rl_opening_home_spread'] = opening_line.get('homeSpread')
-                                        game_info['rl_opening_away_odds'] = opening_line.get('awayOdds') if opening_line.get('awaySpread') else None
-                                        game_info['rl_opening_home_odds'] = opening_line.get('homeOdds') if opening_line.get('homeSpread') else None
-                                        
-                                        game_info['total_opening_line'] = opening_line.get('total')
-                                        game_info['total_opening_over_odds'] = opening_line.get('overOdds')
-                                        game_info['total_opening_under_odds'] = opening_line.get('underOdds')
-                                        
-                                        # Current lines
-                                        game_info['rl_current_away_spread'] = current_line.get('awaySpread')
-                                        game_info['rl_current_home_spread'] = current_line.get('homeSpread')
-                                        game_info['rl_current_away_odds'] = current_line.get('awayOdds') if current_line.get('awaySpread') else None
-                                        game_info['rl_current_home_odds'] = current_line.get('homeOdds') if current_line.get('homeSpread') else None
-                                        
-                                        game_info['total_current_line'] = current_line.get('total')
-                                        game_info['total_current_over_odds'] = current_line.get('overOdds')
-                                        game_info['total_current_underimport streamlit as st
+import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import requests
@@ -271,7 +226,7 @@ def load_odds_data():
     real_data, debug_log, success = get_real_mlb_data_with_debug()
     
     if success and not real_data.empty:
-        data_source = "🏆 SportsbookReview (Live)"
+        data_source = "🏆 SportsbookReview (FanDuel Live)"
         final_data = real_data
     else:
         data_source = "🎲 Fallback Data (Demo)"
