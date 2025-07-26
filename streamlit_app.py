@@ -54,7 +54,7 @@ def get_fanduel_mlb_data():
             main_url = f"https://www.sportsbookreview.com/betting-odds/mlb-baseball/?date={date_str}"
             debug_log.append(f"📡 Main page URL: {main_url}")
             
-            response = session.get(main_url, timeout=15)  # Reduced timeout
+            response = session.get(main_url, timeout=15)
             debug_log.append(f"📊 Response status: {response.status_code}")
             
             if response.status_code == 200:
@@ -103,9 +103,9 @@ def get_fanduel_mlb_data():
                                         debug_log.append(f"   📈 Fetching: {line_history_url}")
                                         
                                         # Add delay to be respectful
-                                        time.sleep(random.uniform(1.0, 2.0))
+                                        time.sleep(random.uniform(0.2, 0.5))
                                         
-                                        line_response = session.get(line_history_url, timeout=10)  # Reduced timeout
+                                        line_response = session.get(line_history_url, timeout=10)
                                         debug_log.append(f"   📊 Line history response: {line_response.status_code}")
                                         
                                         if line_response.status_code == 200:
@@ -115,7 +115,7 @@ def get_fanduel_mlb_data():
                                                 line_json = json.loads(line_match.group(1))
                                                 debug_log.append("   ✅ Found JSON in line history page")
                                                 
-                                                # Navigate to FanDuel data - handle the ACTUAL structure we're seeing
+                                                # Navigate to FanDuel data using the CORRECT structure from the source view
                                                 try:
                                                     page_props = line_json['props']['pageProps']
                                                     debug_log.append(f"      🔍 Page props keys: {list(page_props.keys())}")
@@ -123,81 +123,44 @@ def get_fanduel_mlb_data():
                                                     line_history_model = page_props.get('lineHistoryModel', {})
                                                     debug_log.append(f"      🔍 Line history model keys: {list(line_history_model.keys())}")
                                                     
-                                                    # Check for the expected 'oddsViews' structure first
+                                                    # Get the oddsViews array - this is where all sportsbook data lives
                                                     odds_views = line_history_model.get('oddsViews', [])
-                                                    debug_log.append(f"      🔍 oddsViews length: {len(odds_views)}")
-                                                    
-                                                    # If no oddsViews, try the actual structure we're seeing
-                                                    if not odds_views:
-                                                        debug_log.append(f"      🔍 No oddsViews found, trying alternative structure...")
-                                                        
-                                                        # Try getting sportsbooks data
-                                                        sportsbooks = line_history_model.get('sportsbooks', [])
-                                                        debug_log.append(f"      🔍 Sportsbooks array length: {len(sportsbooks)}")
-                                                        
-                                                        if sportsbooks:
-                                                            sportsbook_names = [sb.get('slug', '').lower() if isinstance(sb, dict) else str(sb).lower() for sb in sportsbooks]
-                                                            debug_log.append(f"      🔍 Available sportsbook names: {sportsbook_names}")
-                                                            
-                                                            # Check if FanDuel is in the sportsbooks list
-                                                            if 'fanduel' in sportsbook_names:
-                                                                debug_log.append(f"      ✅ FanDuel found in sportsbooks list!")
-                                                                
-                                                                # Try to find odds data in lineHistory
-                                                                line_history = line_history_model.get('lineHistory', {})
-                                                                debug_log.append(f"      🔍 lineHistory keys: {list(line_history.keys())}")
-                                                                
-                                                                # Check if there's an oddsViews in lineHistory (different from top level)
-                                                                line_odds_views = line_history.get('oddsViews', [])
-                                                                if line_odds_views:
-                                                                    debug_log.append(f"      🎯 Found oddsViews in lineHistory with {len(line_odds_views)} items")
-                                                                    
-                                                                    # Look for FanDuel in line history odds views
-                                                                    for odds_view in line_odds_views:
-                                                                        sportsbook_name = odds_view.get('sportsbook', '').lower()
-                                                                        if sportsbook_name == 'fanduel':
-                                                                            debug_log.append(f"      🎯 FOUND FANDUEL ODDS DATA!")
-                                                                            debug_log.append(f"      📊 FanDuel data: {str(odds_view)[:300]}...")
-                                                                            break
-                                                                else:
-                                                                    debug_log.append(f"      ❌ No oddsViews in lineHistory - odds not posted yet")
-                                                            else:
-                                                                debug_log.append(f"      ❌ FanDuel not in sportsbooks list")
-                                                        else:
-                                                            debug_log.append(f"      ❌ No sportsbooks data found")
-                                                            
-                                                            # Let's also check the full lineHistory structure for any odds
-                                                            line_history = line_history_model.get('lineHistory', {})
-                                                            if line_history:
-                                                                debug_log.append(f"      🔍 Full lineHistory keys: {list(line_history.keys())}")
-                                                                
-                                                                # Look for any data that might contain odds
-                                                                for key, value in line_history.items():
-                                                                    if isinstance(value, list) and len(value) > 0:
-                                                                        debug_log.append(f"      🔍 {key} is a list with {len(value)} items")
-                                                                        if len(value) > 0 and isinstance(value[0], dict):
-                                                                            debug_log.append(f"      🔍 {key}[0] keys: {list(value[0].keys())}")
-                                                    
-                                                    # If still no usable data, this game doesn't have odds yet
-                                                    if not odds_views and not sportsbooks:
-                                                        debug_log.append(f"      ❌ No odds data available for this game yet")
-                                                    
-                                                    debug_log.append(f"   📋 Found {len(odds_views)} sportsbooks in line history")
-                                                    
-                                                    # List all available sportsbooks
-                                                    available_books = [view.get('sportsbook', 'Unknown') for view in odds_views]
-                                                    debug_log.append(f"   📚 Available sportsbooks: {available_books}")
+                                                    debug_log.append(f"      🔍 Found {len(odds_views)} sportsbooks in oddsViews")
                                                     
                                                     # Find FanDuel data
                                                     fanduel_data = None
+                                                    available_books = []
+                                                    
                                                     for j, view in enumerate(odds_views):
                                                         sportsbook = view.get('sportsbook', '').lower()
+                                                        available_books.append(sportsbook)
                                                         debug_log.append(f"      📖 Sportsbook {j}: '{sportsbook}'")
                                                         
                                                         if sportsbook == 'fanduel':
                                                             fanduel_data = view
                                                             debug_log.append(f"      🎯 FOUND FANDUEL DATA!")
+                                                            
+                                                            # Show what data we found
+                                                            ml_history = fanduel_data.get('moneyLineHistory', [])
+                                                            spread_history = fanduel_data.get('spreadHistory', [])
+                                                            total_history = fanduel_data.get('totalHistory', [])
+                                                            
+                                                            debug_log.append(f"      📊 ML history: {len(ml_history)} entries")
+                                                            debug_log.append(f"      📊 Spread history: {len(spread_history)} entries")
+                                                            debug_log.append(f"      📊 Total history: {len(total_history)} entries")
+                                                            
+                                                            if ml_history:
+                                                                debug_log.append(f"      📊 Sample ML data: {ml_history[0]}")
+                                                            if spread_history:
+                                                                debug_log.append(f"      📊 Sample spread data: {spread_history[0]}")
+                                                            if total_history:
+                                                                debug_log.append(f"      📊 Sample total data: {total_history[0]}")
                                                             break
+                                                    
+                                                    debug_log.append(f"   📚 Available sportsbooks: {available_books}")
+                                                    
+                                                    if not fanduel_data:
+                                                        debug_log.append(f"      ❌ FanDuel not found in available sportsbooks: {available_books}")
                                                     
                                                     if fanduel_data:
                                                         # Extract odds histories
@@ -219,13 +182,17 @@ def get_fanduel_mlb_data():
                                                         total_opening = total_history[0] if total_history else {}
                                                         total_current = total_history[-1] if total_history else {}
                                                         
-                                                        # Log sample data
+                                                        # Log sample data for debugging
                                                         if ml_opening:
                                                             debug_log.append(f"      📊 ML Opening: Away {ml_opening.get('awayOdds')} | Home {ml_opening.get('homeOdds')}")
                                                         if ml_current:
                                                             debug_log.append(f"      📊 ML Current: Away {ml_current.get('awayOdds')} | Home {ml_current.get('homeOdds')}")
+                                                        if spread_opening:
+                                                            debug_log.append(f"      📊 Spread Opening: Away {spread_opening.get('awaySpread')} ({spread_opening.get('awayOdds')}) | Home {spread_opening.get('homeSpread')} ({spread_opening.get('homeOdds')})")
+                                                        if total_opening:
+                                                            debug_log.append(f"      📊 Total Opening: {total_opening.get('total')} - Over {total_opening.get('overOdds')} | Under {total_opening.get('underOdds')}")
                                                         
-                                                        # Create game record
+                                                        # Create game record with sportsbook identifier
                                                         game_info = {
                                                             'date': date_str,
                                                             'away_team': away_name,
@@ -233,6 +200,7 @@ def get_fanduel_mlb_data():
                                                             'game_time': start_date,
                                                             'venue': venue,
                                                             'game_id': game_id,
+                                                            'sportsbook': 'FanDuel',  # Add this to identify source
                                                             
                                                             # Moneyline
                                                             'ml_opening_away': ml_opening.get('awayOdds'),
@@ -260,9 +228,11 @@ def get_fanduel_mlb_data():
                                                         }
                                                         
                                                         debug_log.append(f"      ✅ Successfully extracted FanDuel data for {away_name} @ {home_name}")
+                                                        debug_log.append(f"         - Moneyline: {ml_opening.get('awayOdds')}/{ml_opening.get('homeOdds')} → {ml_current.get('awayOdds')}/{ml_current.get('homeOdds')}")
+                                                        debug_log.append(f"         - Spread: {spread_opening.get('awaySpread')}/{spread_opening.get('homeSpread')} → {spread_current.get('awaySpread')}/{spread_current.get('homeSpread')}")
+                                                        debug_log.append(f"         - Total: {total_opening.get('total')} → {total_current.get('total')}")
+                                                        
                                                         all_games.append(game_info)
-                                                    else:
-                                                        debug_log.append(f"      ❌ FanDuel not found in available sportsbooks")
                                                         
                                                 except KeyError as e:
                                                     debug_log.append(f"   ❌ KeyError in line history navigation: {str(e)}")
@@ -308,70 +278,7 @@ def get_fanduel_mlb_data():
         debug_log.append(f"❌ No FanDuel data found for any games")
         return pd.DataFrame(), debug_log, False
 
-def create_fallback_data():
-    """Create realistic fallback data for today and tomorrow"""
-    
-    et = timezone('US/Eastern')
-    now_et = datetime.now(et)
-    today = now_et.strftime("%Y-%m-%d")
-    tomorrow = (now_et + timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    fallback_games = [
-        # Today's games
-        {
-            'date': today,
-            'away_team': 'Philadelphia',
-            'home_team': 'NY Yankees',
-            'game_time': f'{today}T17:05:00-04:00',
-            'venue': 'Yankee Stadium',
-            'game_id': 342809,
-            'ml_opening_away': 168, 'ml_opening_home': -200,
-            'ml_current_away': 185, 'ml_current_home': -225,
-            'rl_opening_away_odds': -125, 'rl_opening_home_odds': 104,
-            'rl_opening_away_spread': 1.5, 'rl_opening_home_spread': -1.5,
-            'rl_current_away_odds': -118, 'rl_current_home_odds': -102,
-            'rl_current_away_spread': 1.5, 'rl_current_home_spread': -1.5,
-            'total_opening_line': 9.0, 'total_opening_over_odds': -110, 'total_opening_under_odds': -110,
-            'total_current_line': 8.5, 'total_current_over_odds': -105, 'total_current_under_odds': -115
-        },
-        {
-            'date': today,
-            'away_team': 'Miami',
-            'home_team': 'Milwaukee',
-            'game_time': f'{today}T20:10:00-04:00',
-            'venue': 'American Family Field',
-            'game_id': 342810,
-            'ml_opening_away': 155, 'ml_opening_home': -185,
-            'ml_current_away': 142, 'ml_current_home': -168,
-            'rl_opening_away_odds': -130, 'rl_opening_home_odds': 110,
-            'rl_opening_away_spread': 1.5, 'rl_opening_home_spread': -1.5,
-            'rl_current_away_odds': -122, 'rl_current_home_odds': 102,
-            'rl_current_away_spread': 1.5, 'rl_current_home_spread': -1.5,
-            'total_opening_line': 8.0, 'total_opening_over_odds': -115, 'total_opening_under_odds': -105,
-            'total_current_line': 7.5, 'total_current_over_odds': -108, 'total_current_under_odds': -112
-        },
-        # Tomorrow's games
-        {
-            'date': tomorrow,
-            'away_team': 'Boston',
-            'home_team': 'Toronto',
-            'game_time': f'{tomorrow}T15:07:00-04:00',
-            'venue': 'Rogers Centre',
-            'game_id': 342815,
-            'ml_opening_away': -145, 'ml_opening_home': 125,
-            'ml_current_away': -132, 'ml_current_home': 112,
-            'rl_opening_away_odds': 125, 'rl_opening_home_odds': -145,
-            'rl_opening_away_spread': -1.5, 'rl_opening_home_spread': 1.5,
-            'rl_current_away_odds': 115, 'rl_current_home_odds': -135,
-            'rl_current_away_spread': -1.5, 'rl_current_home_spread': 1.5,
-            'total_opening_line': 9.5, 'total_opening_over_odds': -110, 'total_opening_under_odds': -110,
-            'total_current_line': 9.0, 'total_current_over_odds': -115, 'total_current_under_odds': -105
-        }
-    ]
-    
-    return pd.DataFrame(fallback_games)
-
-@st.cache_data(ttl=600)  # Cache for 10 minutes instead of 5
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_odds_data():
     """Load FanDuel odds data for today and tomorrow"""
     
@@ -379,20 +286,18 @@ def load_odds_data():
     real_data, debug_log, success = get_fanduel_mlb_data()
     
     if success and not real_data.empty:
-        fanduel_count = len(real_data[real_data['sportsbook'] == 'FanDuel'])
-        backup_count = len(real_data[real_data['sportsbook'] != 'FanDuel'])
+        fanduel_count = len(real_data[real_data.get('sportsbook', '') == 'FanDuel']) if 'sportsbook' in real_data.columns else 0
+        total_count = len(real_data)
         
-        if fanduel_count > 0 and backup_count > 0:
-            data_source = f"🏆 Mixed: {fanduel_count} FanDuel + {backup_count} Other Sportsbooks"
-        elif fanduel_count > 0:
-            data_source = f"🏆 SportsbookReview ({fanduel_count} FanDuel Games)"
+        if fanduel_count > 0:
+            data_source = f"🏆 SportsbookReview ({fanduel_count} FanDuel Games Found!)"
         else:
-            data_source = f"📊 SportsbookReview ({backup_count} Games - No FanDuel Yet)"
+            data_source = f"📊 SportsbookReview ({total_count} Games - No FanDuel Data Yet)"
         
         final_data = real_data
     else:
-        data_source = "🎲 Fallback Data (Demo Mode)"
-        final_data = create_fallback_data()
+        data_source = "❌ No Data Found"
+        final_data = pd.DataFrame()
     
     # Get current ET time and dates
     et = timezone('US/Eastern')
@@ -575,8 +480,8 @@ def display_game_card(game):
 def main():
     """Main Streamlit application"""
     
-    st.title("⚾ MLB Odds Tracker (FanDuel Preferred)")
-    st.markdown("*Live opening vs current odds from SportsbookReview - FanDuel preferred, other sportsbooks as backup*")
+    st.title("⚾ MLB FanDuel Odds Tracker")
+    st.markdown("*Live opening vs current FanDuel odds from SportsbookReview*")
     
     # Header with refresh button
     col1, col2 = st.columns([1, 4])
@@ -603,8 +508,8 @@ def main():
     scraper_success = data['scraper_success']
     
     # Status banner
-    status_color = "#28a745" if scraper_success else "#ffc107"
-    status_text_color = "white" if scraper_success else "black"
+    status_color = "#28a745" if scraper_success else "#dc3545"
+    status_text_color = "white"
     
     st.markdown(f"""
     <div style="background-color: {status_color}; color: {status_text_color}; padding: 1rem; 
@@ -636,7 +541,6 @@ def main():
                 display_game_card(game)
         else:
             st.info("📅 No games with FanDuel odds found for today")
-            st.markdown("*This could mean no games are scheduled or FanDuel odds aren't available yet.*")
     
     # Tomorrow's games  
     with tab2:
@@ -646,7 +550,6 @@ def main():
                 display_game_card(game)
         else:
             st.info("📅 No games with FanDuel odds found for tomorrow")
-            st.markdown("*Tomorrow's odds may not be posted yet.*")
 
 if __name__ == "__main__":
     main()
