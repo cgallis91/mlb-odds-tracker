@@ -1,115 +1,291 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import requests
+import re
+import json
+from pytz import timezone
 
-# Test with hardcoded data first
-def create_test_data():
-    """Create test data to verify the app works"""
+# Configure page
+st.set_page_config(
+    page_title="MLB Odds Tracker",
+    page_icon="⚾",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+def get_real_mlb_data_with_debug():
+    """Try to get real MLB data and return debug info for display"""
     
-    test_games = [
+    debug_log = []
+    debug_log.append("🧪 Attempting to scrape real MLB data...")
+    
+    session = requests.Session()
+    session.headers.update({
+        'Accept-Encoding': 'identity',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    })
+    
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    try:
+        # Test moneyline URL
+        url = f"https://www.sportsbookreview.com/betting-odds/mlb-baseball/?date={today}"
+        debug_log.append(f"📡 Trying: {url}")
+        
+        response = session.get(url, timeout=30)
+        debug_log.append(f"📊 Response status: {response.status_code}")
+        debug_log.append(f"📏 Response length: {len(response.text)}")
+        
+        if response.status_code == 200:
+            # Extract JSON
+            pattern = r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>'
+            match = re.search(pattern, response.text, re.DOTALL)
+            
+            if match:
+                debug_log.append("✅ Found __NEXT_DATA__ script")
+                json_data = json.loads(match.group(1))
+                
+                # Navigate to games
+                odds_tables = json_data['props']['pageProps']['oddsTables']
+                if odds_tables:
+                    odds_table_model = odds_tables[0]['oddsTableModel']
+                    game_rows = odds_table_model.get('gameRows', [])
+                    
+                    debug_log.append(f"✅ Found {len(game_rows)} games")
+                    
+                    if game_rows:
+                        # Process first few games
+                        real_games = []
+                        
+                        for i, game in enumerate(game_rows[:5]):  # Just first 5 games
+                            try:
+                                game_view = game.get('gameView', {})
+                                opening_line_views = game.get('openingLineViews', [])
+                                
+                                away_team = game_view.get('awayTeam', {})
+                                home_team = game_view.get('homeTeam', {})
+                                
+                                away_name = away_team.get('name', 'Unknown')
+                                home_name = home_team.get('name', 'Unknown')
+                                
+                                debug_log.append(f"🎮 Processing Game {i+1}: {away_name} @ {home_name}")
+                                
+                                game_info = {
+                                    'date': today,
+                                    'away_team': away_name,
+                                    'home_team': home_name,
+                                    'game_time': game_view.get('startDate', 'TBD'),
+                                    'venue': game_view.get('venueName', 'Unknown'),
+                                }
+                                
+                                # Initialize all odds as None
+                                for field in ['ml_opening_away', 'ml_opening_home', 'ml_current_away', 'ml_current_home',
+                                             'rl_opening_away_odds', 'rl_opening_home_odds', 'rl_opening_away_spread', 'rl_opening_home_spread',
+                                             'rl_current_away_odds', 'rl_current_home_odds', 'rl_current_away_spread', 'rl_current_home_spread',
+                                             'total_opening_line', 'total_opening_over_odds', 'total_opening_under_odds',
+                                             'total_current_line', 'total_current_over_odds', 'total_current_under_odds']:
+                                    game_info[field] = None
+                                
+                                debug_log.append(f"   📊 Found {len(opening_line_views)} opening line views")
+                                
+                                # Extract FanDuel data
+                                fanduel_found = False
+                                for j, view in enumerate(opening_line_views):
+                                    sportsbook = view.get('sportsbook', 'Unknown')
+                                    debug_log.append(f"   View {j}: sportsbook = '{sportsbook}'")
+                                    
+                                    if sportsbook.lower() == 'fanduel':
+                                        fanduel_found = True
+                                        opening_line = view.get('openingLine', {})
+                                        current_line = view.get('currentLine', {})
+                                        
+                                        debug_log.append(f"   ✅ FanDuel found!")
+                                        
+                                        # Moneyline data
+                                        ml_opening_away = opening_line.get('awayOdds')
+                                        ml_opening_home = opening_line.get('homeOdds')
+                                        ml_current_away = current_line.get('awayOdds')
+                                        ml_current_home = current_line.get('homeOdds')
+                                        
+                                        game_info['ml_opening_away'] = ml_opening_away
+                                        game_info['ml_opening_home'] = ml_opening_home
+                                        game_info['ml_current_away'] = ml_current_away
+                                        game_info['ml_current_home'] = ml_current_home
+                                        
+                                        debug_log.append(f"   💰 ML Opening: {ml_opening_away}/{ml_opening_home}")
+                                        debug_log.append(f"   💰 ML Current: {ml_current_away}/{ml_current_home}")
+                                        
+                                        # Check for run line data
+                                        rl_away_spread = opening_line.get('awaySpread')
+                                        rl_home_spread = opening_line.get('homeSpread')
+                                        if rl_away_spread is not None:
+                                            debug_log.append(f"   📈 Found run line data: {rl_away_spread}/{rl_home_spread}")
+                                            game_info['rl_opening_away_spread'] = rl_away_spread
+                                            game_info['rl_opening_home_spread'] = rl_home_spread
+                                        else:
+                                            debug_log.append(f"   ❌ No run line data in moneyline view")
+                                        
+                                        # Check for totals data
+                                        total_line = opening_line.get('total')
+                                        if total_line is not None:
+                                            debug_log.append(f"   🎯 Found totals data: {total_line}")
+                                            game_info['total_opening_line'] = total_line
+                                        else:
+                                            debug_log.append(f"   ❌ No totals data in moneyline view")
+                                        
+                                        break
+                                
+                                if not fanduel_found:
+                                    debug_log.append(f"   ❌ No FanDuel found for this game")
+                                
+                                real_games.append(game_info)
+                                
+                            except Exception as e:
+                                debug_log.append(f"❌ Error processing game {i}: {str(e)}")
+                                continue
+                        
+                        if real_games:
+                            debug_log.append(f"✅ Successfully processed {len(real_games)} real games")
+                            return pd.DataFrame(real_games), debug_log, True  # Success
+                        else:
+                            debug_log.append("❌ No games could be processed")
+                    else:
+                        debug_log.append("❌ No games found in gameRows")
+                else:
+                    debug_log.append("❌ No odds tables found")
+            else:
+                debug_log.append("❌ No __NEXT_DATA__ script found")
+        else:
+            debug_log.append(f"❌ Bad response status: {response.status_code}")
+        
+        debug_log.append("❌ Real scraper failed")
+        return pd.DataFrame(), debug_log, False  # Failed
+        
+    except Exception as e:
+        debug_log.append(f"❌ Error in real scraper: {str(e)}")
+        return pd.DataFrame(), debug_log, False  # Failed
+
+def create_fallback_data():
+    """Create realistic fallback data"""
+    
+    fallback_games = [
         {
             'date': '2025-07-25',
             'away_team': 'Miami',
             'home_team': 'Milwaukee',
             'game_time': '2025-07-25T20:10:00+00:00',
             'venue': 'American Family Field',
-            'ml_opening_away': 168,
-            'ml_opening_home': -200,
-            'ml_current_away': 190,
-            'ml_current_home': -230,
-            'rl_opening_away_odds': -125,
-            'rl_opening_home_odds': 104,
-            'rl_opening_away_spread': 1.5,
-            'rl_opening_home_spread': -1.5,
-            'rl_current_away_odds': -110,
-            'rl_current_home_odds': -110,
-            'rl_current_away_spread': 1.5,
-            'rl_current_home_spread': -1.5,
-            'total_opening_line': 8.0,
-            'total_opening_over_odds': -115,
-            'total_opening_under_odds': -105,
-            'total_current_line': 8.0,
-            'total_current_over_odds': -102,
-            'total_current_under_odds': -120
+            'ml_opening_away': 168, 'ml_opening_home': -200,
+            'ml_current_away': 190, 'ml_current_home': -230,
+            'rl_opening_away_odds': -125, 'rl_opening_home_odds': 104,
+            'rl_opening_away_spread': 1.5, 'rl_opening_home_spread': -1.5,
+            'rl_current_away_odds': -110, 'rl_current_home_odds': -110,
+            'rl_current_away_spread': 1.5, 'rl_current_home_spread': -1.5,
+            'total_opening_line': 8.0, 'total_opening_over_odds': -115, 'total_opening_under_odds': -105,
+            'total_current_line': 8.0, 'total_current_over_odds': -102, 'total_current_under_odds': -120
         },
         {
-            'date': '2025-07-26',
+            'date': '2025-07-25',
             'away_team': 'Arizona',
             'home_team': 'Pittsburgh',
-            'game_time': '2025-07-26T19:00:00+00:00',
+            'game_time': '2025-07-25T22:40:00+00:00',
             'venue': 'PNC Park',
-            'ml_opening_away': -136,
-            'ml_opening_home': 116,
-            'ml_current_away': -118,
-            'ml_current_home': -108,
-            'rl_opening_away_odds': 122,
-            'rl_opening_home_odds': -146,
-            'rl_opening_away_spread': -1.5,
-            'rl_opening_home_spread': 1.5,
-            'rl_current_away_odds': 142,
-            'rl_current_home_odds': -192,
-            'rl_current_away_spread': -1.5,
-            'rl_current_home_spread': 1.5,
-            'total_opening_line': 9.0,
-            'total_opening_over_odds': -110,
-            'total_opening_under_odds': -110,
-            'total_current_line': 8.5,
-            'total_current_over_odds': -132,
-            'total_current_under_odds': 100
+            'ml_opening_away': -136, 'ml_opening_home': 116,
+            'ml_current_away': -118, 'ml_current_home': -108,
+            'rl_opening_away_odds': 122, 'rl_opening_home_odds': -146,
+            'rl_opening_away_spread': -1.5, 'rl_opening_home_spread': 1.5,
+            'rl_current_away_odds': 142, 'rl_current_home_odds': -192,
+            'rl_current_away_spread': -1.5, 'rl_current_home_spread': 1.5,
+            'total_opening_line': 9.0, 'total_opening_over_odds': -110, 'total_opening_under_odds': -110,
+            'total_current_line': 8.5, 'total_current_over_odds': -132, 'total_current_under_odds': 100
         }
     ]
     
-    return pd.DataFrame(test_games)
+    return pd.DataFrame(fallback_games)
+
+@st.cache_data(ttl=300)
+def load_odds_data():
+    """Load odds data with debug info"""
+    
+    # Try real data first
+    real_data, debug_log, success = get_real_mlb_data_with_debug()
+    
+    if success and not real_data.empty:
+        data_source = "🏆 SportsbookReview (Live)"
+        final_data = real_data
+    else:
+        data_source = "🎲 Fallback Data (Demo)"
+        final_data = create_fallback_data()
+    
+    et = timezone('US/Eastern')
+    now_et = datetime.now(et)
+    today = now_et.strftime("%Y-%m-%d")
+    tomorrow = (now_et + timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    # Filter by date
+    today_games = final_data[final_data['date'] == today] if not final_data.empty else pd.DataFrame()
+    tomorrow_games = final_data[final_data['date'] == tomorrow] if not final_data.empty else pd.DataFrame()
+    
+    return {
+        'today': today_games,
+        'tomorrow': tomorrow_games,
+        'today_date': today,
+        'tomorrow_date': tomorrow,
+        'last_update': now_et,
+        'data_source': data_source,
+        'debug_log': debug_log,
+        'scraper_success': success
+    }
 
 def format_odds(odds_value):
-    """Format odds for display"""
     if pd.isna(odds_value) or odds_value is None:
         return "Unavailable"
-    
     try:
         odds = int(odds_value)
-        if odds > 0:
-            return f"+{odds}"
-        else:
-            return str(odds)
+        return f"+{odds}" if odds > 0 else str(odds)
     except (ValueError, TypeError):
         return "Unavailable"
 
 def format_spread(spread_value):
-    """Format spread for display"""
     if pd.isna(spread_value) or spread_value is None:
         return "Unavailable"
-    
     try:
         spread = float(spread_value)
-        if spread > 0:
-            return f"+{spread}"
-        else:
-            return str(spread)
+        return f"+{spread}" if spread > 0 else str(spread)
     except (ValueError, TypeError):
         return "Unavailable"
 
 def format_total(total_value):
-    """Format total for display"""
     if pd.isna(total_value) or total_value is None:
         return "Unavailable"
-    
     try:
         return f"{float(total_value)}"
     except (ValueError, TypeError):
         return "Unavailable"
 
+def format_game_time(game_time_str):
+    try:
+        dt = datetime.fromisoformat(game_time_str.replace('Z', '+00:00'))
+        et = timezone('US/Eastern')
+        dt_et = dt.astimezone(et)
+        return dt_et.strftime("%I:%M %p ET")
+    except:
+        return "TBD"
+
+def format_date(date_str):
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%B %d, %Y")
+    except:
+        return date_str
+
 def display_game_card(game):
-    """Display a single game card"""
+    st.markdown(f"### {game['away_team']} @ {game['home_team']}")
+    st.markdown(f"**{game['venue']}** • {format_game_time(game['game_time'])}")
     
-    st.markdown(f"""
-    ### {game['away_team']} @ {game['home_team']}
-    **{game['venue']}** • 8:10 PM ET
-    """)
-    
-    # Opening Lines Section
+    # Opening Lines
     st.markdown("#### 📈 Opening Lines")
-    
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -128,9 +304,8 @@ def display_game_card(game):
         st.write(f"O {total_line}: {format_odds(game['total_opening_over_odds'])}")
         st.write(f"U {total_line}: {format_odds(game['total_opening_under_odds'])}")
     
-    # Current Lines Section
+    # Current Lines
     st.markdown("#### 🔄 Current Lines")
-    
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -152,36 +327,65 @@ def display_game_card(game):
     st.divider()
 
 def main():
-    st.title("⚾ MLB Odds Tracker - Test Version")
-    st.markdown("*Testing with known working data*")
+    st.title("⚾ MLB Odds Tracker - FanDuel Lines")
+    st.markdown("*Real-time opening vs current odds*")
     
-    # Create test data
-    df = create_test_data()
+    # Refresh button
+    if st.button("🔄 Refresh Data", type="primary"):
+        st.cache_data.clear()
+        st.rerun()
     
-    st.write(f"**Data loaded:** {len(df)} test games")
+    # Load data
+    with st.spinner("Loading latest odds..."):
+        data = load_odds_data()
     
-    # Filter by date
-    today_games = df[df['date'] == '2025-07-25']
-    tomorrow_games = df[df['date'] == '2025-07-26']
+    today_df = data['today']
+    tomorrow_df = data['tomorrow']
+    today_date = data['today_date']
+    tomorrow_date = data['tomorrow_date']
+    last_update = data['last_update']
+    data_source = data['data_source']
+    debug_log = data['debug_log']
+    scraper_success = data['scraper_success']
+    
+    # Display status
+    status_color = "#28a745" if scraper_success else "#ffc107"
+    st.markdown(f"""
+    <div style="background-color: {status_color}; color: white; padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; text-align: center;">
+    📊 <strong>Last Updated:</strong> {last_update.strftime('%I:%M:%S %p ET')} | 
+    <strong>Source:</strong> {data_source} | 
+    <strong>Today:</strong> {len(today_df)} games | 
+    <strong>Tomorrow:</strong> {len(tomorrow_df)} games
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Show debug info in expandable section
+    with st.expander("🔍 Debug Information (Click to see what's happening)"):
+        st.markdown("**Scraper Debug Log:**")
+        for log_entry in debug_log:
+            st.text(log_entry)
     
     # Create tabs
-    tab1, tab2 = st.tabs(["📅 Today - July 25, 2025", "📅 Tomorrow - July 26, 2025"])
+    tab1, tab2 = st.tabs([
+        f"📅 Today - {format_date(today_date)}", 
+        f"📅 Tomorrow - {format_date(tomorrow_date)}"
+    ])
     
     with tab1:
-        st.markdown(f"### {len(today_games)} Games Today")
-        for _, game in today_games.iterrows():
-            display_game_card(game)
+        if not today_df.empty:
+            st.markdown(f"### {len(today_df)} Games Today")
+            for _, game in today_df.iterrows():
+                display_game_card(game)
+        else:
+            st.info("📅 No games scheduled for today")
     
     with tab2:
-        st.markdown(f"### {len(tomorrow_games)} Games Tomorrow")
-        for _, game in tomorrow_games.iterrows():
-            display_game_card(game)
-    
-    # Debug info
-    st.markdown("---")
-    st.markdown("### Debug Info")
-    st.write("DataFrame columns:", list(df.columns))
-    st.dataframe(df)
+        if not tomorrow_df.empty:
+            st.markdown(f"### {len(tomorrow_df)} Games Tomorrow")
+            for _, game in tomorrow_df.iterrows():
+                display_game_card(game)
+        else:
+            st.info("📅 No games scheduled for tomorrow")
 
 if __name__ == "__main__":
     main()
