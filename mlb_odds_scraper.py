@@ -1,282 +1,304 @@
-import requests
-import json
-import re
-import time
-import random
+import streamlit as st
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+import time
 import logging
+from comprehensive_scraper import ComprehensiveMLBScraper  # Import our comprehensive scraper
 
-class MLBOddsScraper:
-    def __init__(self):
-        self.session = requests.Session()
-        self.base_url = "https://www.sportsbookreview.com/betting-odds/mlb-baseball"
-        
-        # Rotate user agents to avoid detection
-        self.user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0'
-        ]
-        
-        self.setup_logging()
-        self.update_headers()
-    
-    def setup_logging(self):
-        """Setup logging configuration"""
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s'
-        )
-        self.logger = logging.getLogger(__name__)
-    
-    def update_headers(self):
-        """Update session headers with rotation"""
-        headers = {
-            'User-Agent': random.choice(self.user_agents),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none'
-        }
-        self.session.headers.update(headers)
-    
-    def safe_delay(self, min_delay=2, max_delay=5):
-        """Add random delay between requests"""
-        delay = random.uniform(min_delay, max_delay)
-        time.sleep(delay)
-    
-    def extract_next_data(self, html_content: str) -> Optional[Dict]:
-        """Extract __NEXT_DATA__ JSON from HTML"""
-        try:
-            pattern = r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>'
-            match = re.search(pattern, html_content, re.DOTALL)
-            
-            if match:
-                json_str = match.group(1)
-                return json.loads(json_str)
-            return None
-        except Exception as e:
-            self.logger.error(f"Error extracting JSON data: {e}")
-            return None
-    
-    def fetch_odds_data(self, date_str: str, bet_type: str = 'moneyline') -> Optional[Dict]:
-        """Fetch odds data for a specific date and bet type"""
-        
-        url_map = {
-            'moneyline': f"{self.base_url}/?date={date_str}",
-            'runline': f"{self.base_url}/pointspread/full-game/?date={date_str}",
-            'totals': f"{self.base_url}/totals/full-game/?date={date_str}"
-        }
-        
-        url = url_map.get(bet_type, url_map['moneyline'])
-        
-        try:
-            self.logger.info(f"Fetching {bet_type} data for {date_str}")
-            self.safe_delay()
-            
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-            
-            json_data = self.extract_next_data(response.text)
-            
-            if not json_data:
-                self.logger.warning(f"No JSON data found for {date_str}")
-                return None
-            
-            # Extract odds tables
-            try:
-                odds_tables = json_data['props']['pageProps']['oddsTables']
-                if not odds_tables:
-                    self.logger.info(f"No games found for {date_str}")
-                    return None
-                
-                return odds_tables[0]['oddsTableModel']
-            
-            except KeyError as e:
-                self.logger.error(f"Invalid JSON structure: {e}")
-                return None
-                
-        except requests.RequestException as e:
-            self.logger.error(f"Request failed for {date_str}: {e}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Unexpected error: {e}")
-            return None
-    
-    def find_fanduel_sportsbook_id(self, sportsbooks: List[Dict]) -> Optional[str]:
-        """Find FanDuel's sportsbook ID from the sportsbooks list"""
-        for book in sportsbooks:
-            if 'fanduel' in book.get('name', '').lower():
-                return book.get('id')
-        return None
-    
-    def extract_fanduel_odds(self, game_row: Dict, sportsbook_id: str, bet_type: str) -> Dict:
-        """Extract FanDuel odds from game row"""
-        odds_data = {
-            'opening': {'team1': None, 'team2': None, 'total': None, 'spread': None},
-            'current': {'team1': None, 'team2': None, 'total': None, 'spread': None}
-        }
-        
-        try:
-            sportsbook_data = game_row.get('sportsbookData', {}).get(sportsbook_id, {})
-            
-            if bet_type == 'moneyline':
-                # Extract moneyline odds
-                opening = sportsbook_data.get('ml', {}).get('opening', {})
-                current = sportsbook_data.get('ml', {}).get('current', {})
-                
-                if opening:
-                    odds_data['opening']['team1'] = opening.get('homeOdds')
-                    odds_data['opening']['team2'] = opening.get('awayOdds')
-                
-                if current:
-                    odds_data['current']['team1'] = current.get('homeOdds')
-                    odds_data['current']['team2'] = current.get('awayOdds')
-            
-            elif bet_type == 'runline':
-                # Extract runline odds
-                opening = sportsbook_data.get('ps', {}).get('opening', {})
-                current = sportsbook_data.get('ps', {}).get('current', {})
-                
-                if opening:
-                    odds_data['opening']['team1'] = opening.get('homeOdds')
-                    odds_data['opening']['team2'] = opening.get('awayOdds')
-                    odds_data['opening']['spread'] = opening.get('homeSpread')
-                
-                if current:
-                    odds_data['current']['team1'] = current.get('homeOdds')
-                    odds_data['current']['team2'] = current.get('awayOdds')
-                    odds_data['current']['spread'] = current.get('homeSpread')
-            
-            elif bet_type == 'totals':
-                # Extract totals odds
-                opening = sportsbook_data.get('total', {}).get('opening', {})
-                current = sportsbook_data.get('total', {}).get('current', {})
-                
-                if opening:
-                    odds_data['opening']['team1'] = opening.get('overOdds')
-                    odds_data['opening']['team2'] = opening.get('underOdds')
-                    odds_data['opening']['total'] = opening.get('total')
-                
-                if current:
-                    odds_data['current']['team1'] = current.get('overOdds')
-                    odds_data['current']['team2'] = current.get('underOdds')
-                    odds_data['current']['total'] = current.get('total')
-        
-        except Exception as e:
-            self.logger.error(f"Error extracting FanDuel odds: {e}")
-        
-        return odds_data
-    
-    def get_games_for_dates(self, dates: List[str]) -> pd.DataFrame:
-        """Get all games data for specified dates"""
-        
-        all_games = []
-        
-        for date_str in dates:
-            self.logger.info(f"Processing date: {date_str}")
-            
-            # Get moneyline data first (contains game info)
-            moneyline_data = self.fetch_odds_data(date_str, 'moneyline')
-            if not moneyline_data:
-                continue
-            
-            # Get runline and totals data
-            runline_data = self.fetch_odds_data(date_str, 'runline')
-            totals_data = self.fetch_odds_data(date_str, 'totals')
-            
-            # Find FanDuel sportsbook ID
-            sportsbooks = moneyline_data.get('sportsbooks', [])
-            fanduel_id = self.find_fanduel_sportsbook_id(sportsbooks)
-            
-            if not fanduel_id:
-                self.logger.warning(f"FanDuel not found in sportsbooks for {date_str}")
-                continue
-            
-            # Process each game
-            game_rows = moneyline_data.get('gameRows', [])
-            
-            for i, game_row in enumerate(game_rows):
-                try:
-                    # Basic game info
-                    game_info = {
-                        'date': date_str,
-                        'game_time': game_row.get('startTime', ''),
-                        'away_team': game_row.get('awayTeam', {}).get('name', ''),
-                        'home_team': game_row.get('homeTeam', {}).get('name', ''),
-                        'away_abbr': game_row.get('awayTeam', {}).get('abbreviation', ''),
-                        'home_abbr': game_row.get('homeTeam', {}).get('abbreviation', '')
-                    }
-                    
-                    # Extract FanDuel odds for all bet types
-                    moneyline_odds = self.extract_fanduel_odds(game_row, fanduel_id, 'moneyline')
-                    
-                    # Get corresponding runline and totals data
-                    runline_odds = {}
-                    totals_odds = {}
-                    
-                    if runline_data and i < len(runline_data.get('gameRows', [])):
-                        runline_game = runline_data['gameRows'][i]
-                        runline_odds = self.extract_fanduel_odds(runline_game, fanduel_id, 'runline')
-                    
-                    if totals_data and i < len(totals_data.get('gameRows', [])):
-                        totals_game = totals_data['gameRows'][i]
-                        totals_odds = self.extract_fanduel_odds(totals_game, fanduel_id, 'totals')
-                    
-                    # Combine all data
-                    game_data = {
-                        **game_info,
-                        'ml_opening_away': moneyline_odds.get('opening', {}).get('team2'),
-                        'ml_opening_home': moneyline_odds.get('opening', {}).get('team1'),
-                        'ml_current_away': moneyline_odds.get('current', {}).get('team2'),
-                        'ml_current_home': moneyline_odds.get('current', {}).get('team1'),
-                        'rl_opening_spread': runline_odds.get('opening', {}).get('spread'),
-                        'rl_opening_away': runline_odds.get('opening', {}).get('team2'),
-                        'rl_opening_home': runline_odds.get('opening', {}).get('team1'),
-                        'rl_current_spread': runline_odds.get('current', {}).get('spread'),
-                        'rl_current_away': runline_odds.get('current', {}).get('team2'),
-                        'rl_current_home': runline_odds.get('current', {}).get('team1'),
-                        'total_opening': totals_odds.get('opening', {}).get('total'),
-                        'total_opening_over': totals_odds.get('opening', {}).get('team1'),
-                        'total_opening_under': totals_odds.get('opening', {}).get('team2'),
-                        'total_current': totals_odds.get('current', {}).get('total'),
-                        'total_current_over': totals_odds.get('current', {}).get('team1'),
-                        'total_current_under': totals_odds.get('current', {}).get('team2')
-                    }
-                    
-                    all_games.append(game_data)
-                    
-                except Exception as e:
-                    self.logger.error(f"Error processing game {i} for {date_str}: {e}")
-                    continue
-        
-        return pd.DataFrame(all_games)
-    
-    def get_today_tomorrow_games(self) -> pd.DataFrame:
-        """Get games for today and tomorrow"""
-        today = datetime.now().strftime("%Y-%m-%d")
-        tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-        
-        dates = [today, tomorrow]
-        return self.get_games_for_dates(dates)
+# Configure page
+st.set_page_config(
+    page_title="MLB Odds Tracker",
+    page_icon="⚾",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-# Usage example
+# Custom CSS for better styling
+st.markdown("""
+<style>
+    .main > div {
+        padding-top: 2rem;
+    }
+    .stDataFrame {
+        width: 100%;
+    }
+    .metric-card {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+    }
+    .positive-change {
+        color: #28a745;
+    }
+    .negative-change {
+        color: #dc3545;
+    }
+    .game-header {
+        font-weight: bold;
+        font-size: 1.1em;
+        margin-bottom: 0.5rem;
+    }
+    .refresh-info {
+        background-color: #e3f2fd;
+        padding: 0.5rem;
+        border-radius: 0.25rem;
+        margin-bottom: 1rem;
+        border-left: 4px solid #2196f3;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def load_odds_data():
+    """Load fresh odds data with caching"""
+    try:
+        scraper = ComprehensiveMLBScraper()
+        df = scraper.get_today_tomorrow_games()
+        return df, datetime.now(), "SportsbookReview (FanDuel - All Bet Types)"
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return pd.DataFrame(), datetime.now(), "Error"
+
+def format_odds(odds_value):
+    """Format odds for display"""
+    if pd.isna(odds_value) or odds_value is None:
+        return "-"
+    
+    try:
+        odds = int(odds_value)
+        if odds > 0:
+            return f"+{odds}"
+        else:
+            return str(odds)
+    except (ValueError, TypeError):
+        return "-"
+
+def format_spread(spread_value):
+    """Format spread for display"""
+    if pd.isna(spread_value) or spread_value is None:
+        return "-"
+    
+    try:
+        spread = float(spread_value)
+        if spread > 0:
+            return f"+{spread}"
+        else:
+            return str(spread)
+    except (ValueError, TypeError):
+        return "-"
+
+def format_total(total_value):
+    """Format total for display"""
+    if pd.isna(total_value) or total_value is None:
+        return "-"
+    
+    try:
+        return f"O/U {float(total_value)}"
+    except (ValueError, TypeError):
+        return "-"
+
+def calculate_odds_movement(opening, current):
+    """Calculate and format odds movement"""
+    if pd.isna(opening) or pd.isna(current) or opening is None or current is None:
+        return "", ""
+    
+    try:
+        opening_val = int(opening)
+        current_val = int(current)
+        
+        if opening_val == current_val:
+            return "", ""
+        
+        # For American odds, movement direction
+        movement = current_val - opening_val
+        
+        if movement > 0:
+            return "↗️", "positive-change"
+        else:
+            return "↘️", "negative-change"
+    
+    except (ValueError, TypeError):
+        return "", ""
+
+def display_game_card(row):
+    """Display a single game as a card with all bet types"""
+    
+    with st.container():
+        st.markdown(f"""
+        <div class="game-header">
+        {row['away_team']} @ {row['home_team']} - {row['game_time']}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Create columns for different bet types
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
+        with col1:
+            st.markdown("**Moneyline**")
+            
+            # Away team moneyline
+            away_ml_movement, away_ml_class = calculate_odds_movement(
+                row['ml_opening_away'], row['ml_current_away']
+            )
+            
+            st.markdown(f"""
+            **{row['away_team']}**: {format_odds(row['ml_opening_away'])} → 
+            {format_odds(row['ml_current_away'])} {away_ml_movement}
+            """)
+            
+            # Home team moneyline
+            home_ml_movement, home_ml_class = calculate_odds_movement(
+                row['ml_opening_home'], row['ml_current_home']
+            )
+            
+            st.markdown(f"""
+            **{row['home_team']}**: {format_odds(row['ml_opening_home'])} → 
+            {format_odds(row['ml_current_home'])} {home_ml_movement}
+            """)
+        
+        with col2:
+            st.markdown("**Run Line**")
+            
+            # Display spread
+            spread_opening = format_spread(row['rl_opening_away_spread'])
+            spread_current = format_spread(row['rl_current_away_spread'])
+            
+            st.markdown(f"""
+            **Spread**: {spread_opening} → {spread_current}
+            """)
+            
+            # Away team run line odds
+            away_rl_movement, _ = calculate_odds_movement(
+                row['rl_opening_away_odds'], row['rl_current_away_odds']
+            )
+            
+            st.markdown(f"""
+            **{row['away_team']}**: {format_odds(row['rl_opening_away_odds'])} → {format_odds(row['rl_current_away_odds'])} {away_rl_movement}
+            """)
+            
+            # Home team run line odds
+            home_rl_movement, _ = calculate_odds_movement(
+                row['rl_opening_home_odds'], row['rl_current_home_odds']
+            )
+            
+            st.markdown(f"""
+            **{row['home_team']}**: {format_odds(row['rl_opening_home_odds'])} → {format_odds(row['rl_current_home_odds'])} {home_rl_movement}
+            """)
+        
+        with col3:
+            st.markdown("**Total**")
+            
+            # Display total
+            total_opening = format_total(row['total_opening_line'])
+            total_current = format_total(row['total_current_line'])
+            
+            st.markdown(f"""
+            **Total**: {total_opening} → {total_current}
+            """)
+            
+            # Over odds
+            over_movement, _ = calculate_odds_movement(
+                row['total_opening_over_odds'], row['total_current_over_odds']
+            )
+            
+            st.markdown(f"""
+            **Over**: {format_odds(row['total_opening_over_odds'])} → {format_odds(row['total_current_over_odds'])} {over_movement}
+            """)
+            
+            # Under odds
+            under_movement, _ = calculate_odds_movement(
+                row['total_opening_under_odds'], row['total_current_under_odds']
+            )
+            
+            st.markdown(f"""
+            **Under**: {format_odds(row['total_opening_under_odds'])} → {format_odds(row['total_current_under_odds'])} {under_movement}
+            """)
+        
+        st.divider()
+
+def main():
+    """Main Streamlit app"""
+    
+    # Header
+    st.title("⚾ MLB Odds Tracker - FanDuel Lines")
+    st.markdown("*Real-time opening vs current odds for today and tomorrow's games*")
+    
+    # Refresh button
+    col1, col2, col3 = st.columns([1, 1, 4])
+    
+    with col1:
+        if st.button("🔄 Refresh Data", type="primary"):
+            st.cache_data.clear()
+            st.rerun()
+    
+    with col2:
+        auto_refresh = st.checkbox("Auto-refresh (5 min)", value=False)
+    
+    # Load data
+    with st.spinner("Loading latest odds..."):
+        games_df, last_update, data_source = load_odds_data()
+    
+    # Display last update time and source
+    source_emoji = {
+        'SportsbookReview (FanDuel - All Bet Types)': '🏆',
+        'Error': '❌'
+    }
+    
+    st.markdown(f"""
+    <div class="refresh-info">
+    📊 <strong>Last Updated:</strong> {last_update.strftime('%I:%M:%S %p')} | 
+    <strong>Games Found:</strong> {len(games_df)} | 
+    <strong>Source:</strong> {source_emoji.get(data_source, '📡')} {data_source}
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if games_df.empty:
+        st.warning("No games found for today or tomorrow. Check back later!")
+        return
+    
+    # Group games by date
+    today = datetime.now().strftime("%Y-%m-%d")
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    today_games = games_df[games_df['date'] == today]
+    tomorrow_games = games_df[games_df['date'] == tomorrow]
+    
+    # Display today's games
+    if not today_games.empty:
+        st.header(f"🗓️ Today's Games ({today})")
+        
+        for _, game in today_games.iterrows():
+            display_game_card(game)
+    
+    # Display tomorrow's games
+    if not tomorrow_games.empty:
+        st.header(f"🗓️ Tomorrow's Games ({tomorrow})")
+        
+        for _, game in tomorrow_games.iterrows():
+            display_game_card(game)
+    
+    # Raw data section (collapsible)
+    with st.expander("📋 View Raw Data"):
+        st.dataframe(games_df, use_container_width=True)
+    
+    # Auto-refresh functionality
+    if auto_refresh:
+        time.sleep(300)  # Wait 5 minutes
+        st.rerun()
+    
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    <div style='text-align: center; color: #666; padding: 1rem;'>
+    <small>
+    Data sourced from SportsbookReview.com • FanDuel odds only • 
+    Updates every 5 minutes when refreshed • 
+    For entertainment purposes only
+    </small>
+    </div>
+    """, unsafe_allow_html=True)
+
 if __name__ == "__main__":
-    scraper = MLBOddsScraper()
-    games_df = scraper.get_today_tomorrow_games()
-    
-    if not games_df.empty:
-        print(f"Found {len(games_df)} games")
-        print(games_df.head())
-        
-        # Save to CSV for testing
-        games_df.to_csv('mlb_odds.csv', index=False)
-        print("Data saved to mlb_odds.csv")
-    else:
-        print("No games found")
+    main()
