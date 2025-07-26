@@ -314,23 +314,40 @@ def load_odds_data():
     try:
         scraper = ComprehensiveMLBScraper()
         
-        today = datetime.now().strftime("%Y-%m-%d")
-        tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        # Get current Eastern Time for proper date calculation
+        et = timezone('US/Eastern')
+        now_et = datetime.now(et)
+        
+        today = now_et.strftime("%Y-%m-%d")
+        tomorrow = (now_et + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        print(f"Loading data for today: {today}, tomorrow: {tomorrow}")
         
         today_games = scraper.get_games_for_date(today)
         tomorrow_games = scraper.get_games_for_date(tomorrow)
         
+        print(f"Found {len(today_games)} games for today, {len(tomorrow_games)} games for tomorrow")
+        
         return {
             'today': pd.DataFrame(today_games) if today_games else pd.DataFrame(),
             'tomorrow': pd.DataFrame(tomorrow_games) if tomorrow_games else pd.DataFrame(),
-            'last_update': datetime.now()
+            'today_date': today,
+            'tomorrow_date': tomorrow,
+            'last_update': now_et
         }
     except Exception as e:
-        st.error(f"Error loading data: {e}")
+        print(f"Error loading data: {e}")
+        et = timezone('US/Eastern')
+        now_et = datetime.now(et)
+        today = now_et.strftime("%Y-%m-%d")
+        tomorrow = (now_et + timedelta(days=1)).strftime("%Y-%m-%d")
+        
         return {
             'today': pd.DataFrame(),
             'tomorrow': pd.DataFrame(),
-            'last_update': datetime.now()
+            'today_date': today,
+            'tomorrow_date': tomorrow,
+            'last_update': now_et
         }
 
 def format_odds(odds_value):
@@ -484,6 +501,8 @@ def main():
     
     today_df = data['today']
     tomorrow_df = data['tomorrow']
+    today_date = data['today_date']
+    tomorrow_date = data['tomorrow_date']
     last_update = data['last_update']
     
     # Display last update info
@@ -496,9 +515,14 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # Create tabs for today and tomorrow
-    today_date = datetime.now().strftime("%Y-%m-%d")
-    tomorrow_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    # Get the actual dates being used
+    # Debug info - remove these lines after testing
+    st.write(f"Debug - Today date: {today_date}, Tomorrow date: {tomorrow_date}")
+    st.write(f"Debug - Today games count: {len(today_df)}, Tomorrow games count: {len(tomorrow_df)}")
+    if not today_df.empty:
+        st.write(f"Debug - Today df dates: {today_df['date'].unique()}")
+    if not tomorrow_df.empty:
+        st.write(f"Debug - Tomorrow df dates: {tomorrow_df['date'].unique()}")
     
     tab1, tab2 = st.tabs([
         f"📅 Today - {format_date(today_date)}", 
